@@ -581,7 +581,10 @@ export default function WalletWatcher() {
     if (dbStatus !== "connected") return;
     try {
       await supabase.upsert("wallets", [walletToDbRow(wallet)]);
-      if (wallet.tokens.length > 0) await supabase.upsert("tokens", wallet.tokens.map((t) => tokenToDbRow(t, wallet.id)));
+      try { await supabase.delete("tokens", { wallet_id: wallet.id }); } catch (e) {}
+      if (wallet.tokens.length > 0) {
+        try { await supabase.insert("tokens", wallet.tokens.map((t) => tokenToDbRow(t, wallet.id))); } catch (e) {}
+      }
     } catch (e) { console.warn("Save wallet failed:", e.message); }
   }, [dbStatus]);
 
@@ -590,8 +593,13 @@ export default function WalletWatcher() {
     if (dbStatus !== "connected") return;
     try {
       await supabase.upsert("wallets", walletList.map(walletToDbRow));
-      const allTokens = walletList.flatMap((w) => w.tokens.map((t) => tokenToDbRow(t, w.id)));
-      if (allTokens.length > 0) await supabase.upsert("tokens", allTokens);
+      // Delete-then-insert for tokens (no composite unique key for upsert)
+      for (const w of walletList) {
+        try { await supabase.delete("tokens", { wallet_id: w.id }); } catch (e) {}
+        if (w.tokens.length > 0) {
+          try { await supabase.insert("tokens", w.tokens.map((t) => tokenToDbRow(t, w.id))); } catch (e) {}
+        }
+      }
     } catch (e) { console.warn("Batch save failed:", e.message); }
   }, [dbStatus]);
 
@@ -783,23 +791,29 @@ export default function WalletWatcher() {
     setRefreshing(false);
   };
 
-  // Keep a ref to current wallets for auto-refresh
+  // Keep refs for stable auto-refresh (avoids circular useCallback/useEffect dependencies)
   const walletsRef = useRef(wallets);
   useEffect(() => { walletsRef.current = wallets; }, [wallets]);
+  const refreshWalletDataRef = useRef(refreshWalletData);
+  useEffect(() => { refreshWalletDataRef.current = refreshWalletData; }, [refreshWalletData]);
+  const saveAllWalletsToDbRef = useRef(saveAllWalletsToDb);
+  useEffect(() => { saveAllWalletsToDbRef.current = saveAllWalletsToDb; }, [saveAllWalletsToDb]);
+  const recordSnapshotRef = useRef(recordSnapshot);
+  useEffect(() => { recordSnapshotRef.current = recordSnapshot; }, [recordSnapshot]);
 
   // Auto-refresh timer — calls real Etherscan API
   useEffect(() => {
     const timer = setInterval(async () => {
       try {
         const current = walletsRef.current;
-        const updated = await refreshWalletData(current);
+        const updated = await refreshWalletDataRef.current(current);
         setWallets(updated);
-        recordSnapshot(updated);
-        saveAllWalletsToDb(updated);
+        try { recordSnapshotRef.current(updated); } catch (e) {}
+        try { saveAllWalletsToDbRef.current(updated); } catch (e) {}
       } catch (e) { console.warn("Auto-refresh failed:", e.message); }
     }, refreshInterval * 1000);
     return () => clearInterval(timer);
-  }, [refreshInterval, refreshWalletData, recordSnapshot, saveAllWalletsToDb]);
+  }, [refreshInterval]);
 
   // Fetch full data on initial load
   useEffect(() => {
