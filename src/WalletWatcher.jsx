@@ -3,8 +3,8 @@ import { useState, useEffect, useCallback, useRef } from "react";
 // ══════════════════════════════════════════════════════════════
 //  SUPABASE CONFIG — Replace with your project credentials
 // ══════════════════════════════════════════════════════════════
-const SUPABASE_URL = import.meta.env?.VITE_SUPABASE_URL || "https://gmfzbizhlefxapijqnfh.supabase.co";
-const SUPABASE_ANON_KEY = import.meta.env?.VITE_SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdtZnpiaXpobGVmeGFwaWpxbmZoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA4MzcwODQsImV4cCI6MjA4NjQxMzA4NH0.PKN4l3gZujgSDjAPkwWbNEMt4tbQaqSWIl0H2bfQJ0Q";
+const SUPABASE_URL = "https://gmfzbizhlefxapijqnfh.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdtZnpiaXpobGVmeGFwaWpxbmZoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA4MzcwODQsImV4cCI6MjA4NjQxMzA4NH0.PKN4l3gZujgSDjAPkwWbNEMt4tbQaqSWIl0H2bfQJ0Q";
 
 // Lightweight Supabase REST client (no SDK needed)
 const supabase = {
@@ -297,7 +297,7 @@ function DeleteModal({ wallet, onConfirm, onCancel }) {
           </p>
           <div style={{ background: "#f8f9fa", border: "1px solid #e9ecef", borderRadius: 10, padding: "14px 16px" }}>
             <div style={{ fontSize: 13, color: "#6c757d", marginBottom: 4 }}>Wallet Address</div>
-            <div style={{ fontSize: 13, color: "#1e2022", wordBreak: "break-all" }}><MaskedAddress address={wallet.address} fontSize={13} /></div>
+            <div style={{ fontSize: 13, color: "#1e2022" }}><span style={S.mono}>...{wallet.address.slice(-7)}</span></div>
             <div style={{ display: "flex", gap: 16, marginTop: 10 }}>
               <div>
                 <div style={{ fontSize: 11, color: "#6c757d", textTransform: "uppercase", letterSpacing: "0.04em" }}>Balance</div>
@@ -949,9 +949,7 @@ export default function WalletWatcher() {
                 <div>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}><span style={S.badge("info")}>{w.chain}</span><span style={{ fontSize: 18, fontWeight: 700 }}>{w.label}</span></div>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <MaskedAddress address={w.address} fontSize={13.5} />
-                    <button style={{ background: "none", border: "none", cursor: "pointer", padding: 2 }} onClick={() => handleCopy(w.address)} title="Copy"><CopyIcon /></button>
-                    {copied && <span style={{ fontSize: 11, color: "#065f46" }}>Copied!</span>}
+                    <span style={{ ...S.mono, fontSize: 13.5, color: "#6c757d" }}>...{w.address.slice(-7)}</span>
                   </div>
                 </div>
                 <div style={{ display: "flex", gap: 8 }}>
@@ -975,12 +973,7 @@ export default function WalletWatcher() {
                 </div>
                 <div style={S.formGroup}>
                   <label style={S.label}>Wallet Address</label>
-                  <input style={{ ...S.input, fontFamily: "'Roboto Mono', monospace" }} value={editForm.address}
-                    onChange={(e) => setEditForm({ ...editForm, address: e.target.value.trim() })}
-                    onFocus={(e) => { e.target.style.borderColor = "#0784c3"; e.target.style.boxShadow = "0 0 0 3px rgba(7,132,195,0.1)"; }}
-                    onBlur={(e) => { e.target.style.borderColor = "#d1d5db"; e.target.style.boxShadow = "none"; }} />
-                  {editForm.address && !validateAddress(editForm.address) && <div style={{ fontSize: 12, color: "#dc3545", marginTop: 6 }}>⚠ Invalid address format</div>}
-                  {editForm.address && validateAddress(editForm.address) && <div style={{ fontSize: 12, color: "#065f46", marginTop: 6, display: "flex", alignItems: "center", gap: 4 }}><CheckCircle /> Valid address</div>}
+                  <div style={{ ...S.input, fontFamily: "'Roboto Mono', monospace", background: "#f8f9fa", color: "#6c757d", cursor: "default" }}>...{editForm.address.slice(-7)}</div>
                 </div>
                 <div style={S.formGroup}>
                   <label style={S.label}>Nickname</label>
@@ -1127,7 +1120,7 @@ export default function WalletWatcher() {
                 <tbody>{alerts.map((a) => (
                   <tr key={a.id}>
                     <td style={{ ...S.td, fontWeight: 600 }}>{a.walletLabel}</td>
-                    <td style={{ ...S.td }}><MaskedAddress address={a.address} linkStyle={true} fontSize={13} /></td>
+                    <td style={{ ...S.td }}><span style={{ ...S.mono, ...S.link }}>...{a.address.slice(-7)}</span></td>
                     <td style={S.td}>{a.type}</td>
                     <td style={S.td}><span style={S.badge("warning")}>{a.threshold}</span></td>
                     <td style={{ ...S.td, textAlign: "center" }}><span style={S.badge(a.active ? "success" : "default")}>{a.active ? "Active" : "Paused"}</span></td>
