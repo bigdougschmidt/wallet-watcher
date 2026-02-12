@@ -579,9 +579,44 @@ export default function WalletWatcher() {
   // Simulate fetching latest wallet values with price fluctuations
   const refreshWalletValues = (walletList) => {
     return walletList.map((w) => {
-      if (w.tokens.length === 0) return { ...w, lastUpdated: "Just now" };
+      // Simulate initial blockchain data fetch for newly added wallets
+      if (w.tokens.length === 0) {
+        const ethQty = parseFloat((Math.random() * 10 + 0.5).toFixed(4));
+        const ethPrice = 2841.2;
+        const ethValue = parseFloat((ethQty * ethPrice).toFixed(2));
+        const possibleTokens = [
+          { symbol: "USDC", name: "USD Coin", price: 1.0 },
+          { symbol: "LINK", name: "Chainlink", price: 15.8 },
+          { symbol: "UNI", name: "Uniswap", price: 13.7 },
+          { symbol: "AAVE", name: "Aave", price: 168.5 },
+          { symbol: "DAI", name: "Dai", price: 1.0 },
+          { symbol: "APE", name: "ApeCoin", price: 1.11 },
+          { symbol: "MATIC", name: "Polygon", price: 0.58 },
+          { symbol: "ARB", name: "Arbitrum", price: 1.12 },
+        ];
+        // Pick 1-3 random ERC-20 tokens
+        const shuffled = possibleTokens.sort(() => Math.random() - 0.5);
+        const pickedCount = Math.floor(Math.random() * 3) + 1;
+        const extraTokens = shuffled.slice(0, pickedCount).map((t) => {
+          const qty = parseFloat((Math.random() * 500 + 10).toFixed(2));
+          const value = parseFloat((qty * t.price).toFixed(2));
+          const change = parseFloat(((Math.random() - 0.5) * 10).toFixed(2));
+          return { ...t, qty, value, change };
+        });
+        const allTokens = [
+          { symbol: "ETH", name: "Ethereum", qty: ethQty, price: ethPrice, value: ethValue, change: parseFloat(((Math.random() - 0.3) * 6).toFixed(2)) },
+          ...extraTokens,
+        ];
+        const totalUsd = allTokens.reduce((s, t) => s + t.value, 0);
+        const txnCount = Math.floor(Math.random() * 200) + 5;
+        return {
+          ...w, tokens: allTokens, totalUsd: parseFloat(totalUsd.toFixed(2)),
+          ethBalance: ethQty, ethValue, change24h: parseFloat(((Math.random() - 0.5) * 8).toFixed(2)),
+          txnCount, lastUpdated: "Just now",
+        };
+      }
       const updatedTokens = w.tokens.map((t) => {
-        const pctChange = (Math.random() - 0.48) * 2.5; // slight upward bias, range ~-1.2% to +1.3%
+        const pctChange = (Math.random() - 0.48) * 2.5;
         const newPrice = Math.max(0.001, t.price * (1 + pctChange / 100));
         const newValue = t.qty * newPrice;
         const newChange = parseFloat((t.change + pctChange * 0.3).toFixed(2));
