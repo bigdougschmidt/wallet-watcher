@@ -59,7 +59,7 @@ const isSupabaseConfigured = () =>
 // ══════════════════════════════════════════════════════════════
 //  ETHERSCAN API — Real blockchain data
 // ══════════════════════════════════════════════════════════════
-const ETHERSCAN_API_KEY = ""; // Optional: free key from etherscan.io/myapikey for faster requests
+const ETHERSCAN_API_KEY = "M6FNGQMSMF9TGRJ1G9E3ENIMJYMZPPCGEC"; // Optional: free key from etherscan.io/myapikey for faster requests
 const etherscanFetch = async (params) => {
   const keyParam = ETHERSCAN_API_KEY ? `&apikey=${ETHERSCAN_API_KEY}` : "";
   try {
