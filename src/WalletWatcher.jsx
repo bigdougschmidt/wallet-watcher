@@ -783,6 +783,10 @@ export default function WalletWatcher() {
     setRefreshing(false);
   };
 
+  // Keep a ref to current wallets for auto-refresh
+  const walletsRef = useRef(wallets);
+  useEffect(() => { walletsRef.current = wallets; }, [wallets]);
+
   // Auto-refresh timer — calls real Etherscan API
   useEffect(() => {
     const timer = setInterval(async () => {
@@ -796,10 +800,6 @@ export default function WalletWatcher() {
     }, refreshInterval * 1000);
     return () => clearInterval(timer);
   }, [refreshInterval, refreshWalletData, recordSnapshot, saveAllWalletsToDb]);
-
-  // Keep a ref to current wallets for auto-refresh
-  const walletsRef = useRef(wallets);
-  useEffect(() => { walletsRef.current = wallets; }, [wallets]);
 
   // Fetch full data on initial load
   useEffect(() => {
