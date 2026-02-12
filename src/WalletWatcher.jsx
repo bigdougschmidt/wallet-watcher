@@ -477,6 +477,7 @@ function DeleteModal({ wallet, onConfirm, onCancel }) {
 
 export default function WalletWatcher() {
   const [view, setView] = useState("watchlist");
+  const [wallets, setWallets] = useState(INITIAL_WALLETS);
   const [liveEthPrice, setLiveEthPrice] = useState(0);
 
   // Derive live ETH price from wallet data
@@ -486,7 +487,6 @@ export default function WalletWatcher() {
       if (eth && eth.price > 0) { setLiveEthPrice(eth.price); return; }
     }
   }, [wallets]);
-  const [wallets, setWallets] = useState(INITIAL_WALLETS);
   const [storageReady, setStorageReady] = useState(false);
   const [dbStatus, setDbStatus] = useState("loading"); // "loading" | "connected" | "local" | "offline"
   const prevBalancesRef = useRef({});
