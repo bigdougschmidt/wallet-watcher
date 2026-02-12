@@ -439,7 +439,7 @@ function DeleteModal({ wallet, onConfirm, onCancel }) {
           </p>
           <div style={{ background: "#f8f9fa", border: "1px solid #e9ecef", borderRadius: 10, padding: "14px 16px" }}>
             <div style={{ fontSize: 13, color: "#6c757d", marginBottom: 4 }}>Wallet Address</div>
-            <div style={{ fontSize: 13, color: "#1e2022" }}><span style={S.mono}>...{wallet.address.slice(-7)}</span></div>
+            <div style={{ fontSize: 13, color: "#1e2022" }}><span style={{ fontFamily: "'Roboto Mono', monospace" }}>...{wallet.address.slice(-7)}</span></div>
             <div style={{ display: "flex", gap: 16, marginTop: 10 }}>
               <div>
                 <div style={{ fontSize: 11, color: "#6c757d", textTransform: "uppercase", letterSpacing: "0.04em" }}>Balance</div>
