@@ -56,6 +56,148 @@ const supabase = {
 const isSupabaseConfigured = () =>
   SUPABASE_URL !== "https://YOUR_PROJECT_ID.supabase.co" && SUPABASE_ANON_KEY !== "YOUR_ANON_KEY_HERE";
 
+// ══════════════════════════════════════════════════════════════
+//  ETHERSCAN API — Real blockchain data
+// ══════════════════════════════════════════════════════════════
+const ETHERSCAN_API_KEY = ""; // Optional: free key from etherscan.io/myapikey for faster requests
+const etherscanFetch = async (params) => {
+  const keyParam = ETHERSCAN_API_KEY ? `&apikey=${ETHERSCAN_API_KEY}` : "";
+  try {
+    const res = await fetch(`https://api.etherscan.io/api?${params}${keyParam}`);
+    const data = await res.json();
+    if (data.status === "1" || data.result) return data.result;
+    return null;
+  } catch (e) { console.warn("Etherscan API error:", e.message); return null; }
+};
+
+const delay = (ms) => new Promise((r) => setTimeout(r, ms));
+const API_DELAY = ETHERSCAN_API_KEY ? 250 : 5500; // Rate limit: 5/s with key, 1/5s without
+
+// Fetch real wallet data from Etherscan
+const fetchWalletFromChain = async (address) => {
+  try {
+    // 1) ETH balance (in wei)
+    const balanceWei = await etherscanFetch(`module=account&action=balance&address=${address}&tag=latest`);
+    const ethBalance = balanceWei ? parseFloat(balanceWei) / 1e18 : 0;
+
+    await delay(API_DELAY);
+
+    // 2) ETH price
+    const priceData = await etherscanFetch(`module=stats&action=ethprice`);
+    const ethPrice = priceData?.ethusd ? parseFloat(priceData.ethusd) : 0;
+    const ethValue = ethBalance * ethPrice;
+
+    await delay(API_DELAY);
+
+    // 3) Transaction count
+    const txCountHex = await etherscanFetch(`module=proxy&action=eth_getTransactionCount&address=${address}&tag=latest`);
+    const txnCount = txCountHex ? parseInt(txCountHex, 16) : 0;
+
+    await delay(API_DELAY);
+
+    // 4) Recent transactions (last 5)
+    const txListRaw = await etherscanFetch(`module=account&action=txlist&address=${address}&page=1&offset=5&sort=desc`);
+    const transactions = Array.isArray(txListRaw) ? txListRaw.map((tx) => {
+      const age = Math.floor((Date.now() / 1000 - parseInt(tx.timeStamp)) / 60);
+      const ageStr = age < 60 ? `${age} min ago` : age < 1440 ? `${Math.floor(age / 60)} hr ago` : `${Math.floor(age / 1440)} d ago`;
+      const valEth = parseFloat(tx.value) / 1e18;
+      const feeEth = (parseFloat(tx.gasUsed) * parseFloat(tx.gasPrice)) / 1e18;
+      return {
+        hash: tx.hash.slice(0, 10) + "..." + tx.hash.slice(-6),
+        method: tx.functionName ? tx.functionName.split("(")[0] : (parseFloat(tx.value) > 0 ? "Transfer" : "Contract Call"),
+        block: tx.blockNumber,
+        age: ageStr,
+        from: tx.from.slice(0, 10) + "..." + tx.from.slice(-5),
+        to: tx.to ? tx.to.slice(0, 10) + "..." + tx.to.slice(-5) : "Contract Create",
+        value: valEth > 0 ? valEth.toFixed(4) + " ETH" : "0 ETH",
+        fee: feeEth.toFixed(5),
+      };
+    }) : [];
+
+    await delay(API_DELAY);
+
+    // 5) ERC-20 token transfers → derive current holdings
+    const tokenTxsRaw = await etherscanFetch(`module=account&action=tokentx&address=${address}&page=1&offset=200&sort=desc`);
+    const tokenHoldings = {};
+    if (Array.isArray(tokenTxsRaw)) {
+      for (const tx of tokenTxsRaw) {
+        const sym = tx.tokenSymbol;
+        if (!sym || sym.length > 10) continue; // skip spam tokens with long names
+        const decimals = parseInt(tx.tokenDecimal) || 18;
+        const amt = parseFloat(tx.value) / Math.pow(10, decimals);
+        if (!tokenHoldings[sym]) {
+          tokenHoldings[sym] = { symbol: sym, name: tx.tokenName || sym, qty: 0, price: 0, value: 0, change: 0, contractAddress: tx.contractAddress };
+        }
+        // Track net balance: + for incoming, - for outgoing
+        if (tx.to.toLowerCase() === address.toLowerCase()) {
+          tokenHoldings[sym].qty += amt;
+        } else {
+          tokenHoldings[sym].qty -= amt;
+        }
+      }
+    }
+
+    // Filter out tokens with zero or negative balance, and try to get prices for major tokens
+    const KNOWN_PRICES = {
+      USDC: 1.0, USDT: 1.0, DAI: 1.0, LINK: 15.5, UNI: 13.5, AAVE: 170, WETH: ethPrice,
+      WBTC: 65000, MATIC: 0.58, ARB: 1.1, OP: 3.2, APE: 1.1, SHIB: 0.000025, PEPE: 0.000015,
+      LDO: 2.8, RPL: 30, MKR: 3200, SNX: 3.5, CRV: 0.9, COMP: 85, SUSHI: 1.8, BAL: 4.5,
+      ENS: 35, GRT: 0.25, FET: 2.3, RNDR: 10, IMX: 2.5, SAND: 0.55, MANA: 0.6, AXS: 9,
+    };
+
+    const erc20Tokens = Object.values(tokenHoldings)
+      .filter((t) => t.qty > 0.001)
+      .map((t) => {
+        const price = KNOWN_PRICES[t.symbol] || 0;
+        return { symbol: t.symbol, name: t.name, qty: parseFloat(t.qty.toFixed(6)), price, value: parseFloat((t.qty * price).toFixed(2)), change: 0 };
+      })
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 10); // Top 10 tokens by value
+
+    const allTokens = [
+      { symbol: "ETH", name: "Ethereum", qty: parseFloat(ethBalance.toFixed(6)), price: ethPrice, value: parseFloat(ethValue.toFixed(2)), change: 0 },
+      ...erc20Tokens,
+    ];
+    const totalUsd = allTokens.reduce((s, t) => s + t.value, 0);
+
+    return {
+      ethBalance: parseFloat(ethBalance.toFixed(6)),
+      ethValue: parseFloat(ethValue.toFixed(2)),
+      ethPrice,
+      totalUsd: parseFloat(totalUsd.toFixed(2)),
+      txnCount,
+      tokens: allTokens,
+      transactions,
+      change24h: 0,
+      lastUpdated: "Just now",
+    };
+  } catch (err) {
+    console.error("fetchWalletFromChain error:", err);
+    return null;
+  }
+};
+
+// Batch fetch ETH balances + price for all wallets (fast — only 2 API calls)
+const fetchQuickRefresh = async (addresses) => {
+  try {
+    const balances = await etherscanFetch(`module=account&action=balancemulti&address=${addresses.join(",")}&tag=latest`);
+    await delay(API_DELAY);
+    const priceData = await etherscanFetch(`module=stats&action=ethprice`);
+    const ethPrice = priceData?.ethusd ? parseFloat(priceData.ethusd) : 0;
+
+    const balanceMap = {};
+    if (Array.isArray(balances)) {
+      for (const b of balances) {
+        balanceMap[b.account.toLowerCase()] = parseFloat(b.balance) / 1e18;
+      }
+    }
+    return { balanceMap, ethPrice };
+  } catch (err) {
+    console.error("fetchQuickRefresh error:", err);
+    return null;
+  }
+};
+
 // ── MOCK DATA ──
 const INITIAL_WALLETS = [
   {
@@ -335,6 +477,15 @@ function DeleteModal({ wallet, onConfirm, onCancel }) {
 
 export default function WalletWatcher() {
   const [view, setView] = useState("watchlist");
+  const [liveEthPrice, setLiveEthPrice] = useState(0);
+
+  // Derive live ETH price from wallet data
+  useEffect(() => {
+    for (const w of wallets) {
+      const eth = w.tokens?.find((t) => t.symbol === "ETH");
+      if (eth && eth.price > 0) { setLiveEthPrice(eth.price); return; }
+    }
+  }, [wallets]);
   const [wallets, setWallets] = useState(INITIAL_WALLETS);
   const [storageReady, setStorageReady] = useState(false);
   const [dbStatus, setDbStatus] = useState("loading"); // "loading" | "connected" | "local" | "offline"
@@ -573,104 +724,95 @@ export default function WalletWatcher() {
   const sortLabel = sortOrder === "default" ? "" : sortOrder === "desc" ? ": High→Low" : ": Low→High";
 
   const [refreshing, setRefreshing] = useState(false);
-  const [refreshInterval, setRefreshInterval] = useState(15);
-  const REFRESH_OPTIONS = [2, 5, 7, 10, 12, 15];
+  const [refreshInterval, setRefreshInterval] = useState(60);
+  const REFRESH_OPTIONS = [30, 60, 120, 300];
 
-  // Simulate fetching latest wallet values with price fluctuations
-  const refreshWalletValues = (walletList) => {
+  // Fetch real blockchain data for all wallets (quick mode: balance + price only)
+  const refreshWalletData = useCallback(async (walletList) => {
+    const addresses = walletList.map((w) => w.address);
+    const result = await fetchQuickRefresh(addresses);
+    if (!result) return walletList; // API failed, keep existing data
+    const { balanceMap, ethPrice } = result;
     return walletList.map((w) => {
-      // Simulate initial blockchain data fetch for newly added wallets
-      if (w.tokens.length === 0) {
-        const ethQty = parseFloat((Math.random() * 10 + 0.5).toFixed(4));
-        const ethPrice = 2841.2;
-        const ethValue = parseFloat((ethQty * ethPrice).toFixed(2));
-        const possibleTokens = [
-          { symbol: "USDC", name: "USD Coin", price: 1.0 },
-          { symbol: "LINK", name: "Chainlink", price: 15.8 },
-          { symbol: "UNI", name: "Uniswap", price: 13.7 },
-          { symbol: "AAVE", name: "Aave", price: 168.5 },
-          { symbol: "DAI", name: "Dai", price: 1.0 },
-          { symbol: "APE", name: "ApeCoin", price: 1.11 },
-          { symbol: "MATIC", name: "Polygon", price: 0.58 },
-          { symbol: "ARB", name: "Arbitrum", price: 1.12 },
-        ];
-        // Pick 1-3 random ERC-20 tokens
-        const shuffled = possibleTokens.sort(() => Math.random() - 0.5);
-        const pickedCount = Math.floor(Math.random() * 3) + 1;
-        const extraTokens = shuffled.slice(0, pickedCount).map((t) => {
-          const qty = parseFloat((Math.random() * 500 + 10).toFixed(2));
-          const value = parseFloat((qty * t.price).toFixed(2));
-          const change = parseFloat(((Math.random() - 0.5) * 10).toFixed(2));
-          return { ...t, qty, value, change };
-        });
-        const allTokens = [
-          { symbol: "ETH", name: "Ethereum", qty: ethQty, price: ethPrice, value: ethValue, change: parseFloat(((Math.random() - 0.3) * 6).toFixed(2)) },
-          ...extraTokens,
-        ];
-        const totalUsd = allTokens.reduce((s, t) => s + t.value, 0);
-        const txnCount = Math.floor(Math.random() * 200) + 5;
-        return {
-          ...w, tokens: allTokens, totalUsd: parseFloat(totalUsd.toFixed(2)),
-          ethBalance: ethQty, ethValue, change24h: parseFloat(((Math.random() - 0.5) * 8).toFixed(2)),
-          txnCount, lastUpdated: "Just now",
-        };
-      }
-      const updatedTokens = w.tokens.map((t) => {
-        const pctChange = (Math.random() - 0.48) * 2.5;
-        const newPrice = Math.max(0.001, t.price * (1 + pctChange / 100));
-        const newValue = t.qty * newPrice;
-        const newChange = parseFloat((t.change + pctChange * 0.3).toFixed(2));
-        return { ...t, price: parseFloat(newPrice.toFixed(4)), value: parseFloat(newValue.toFixed(2)), change: newChange };
-      });
-      const newTotalUsd = updatedTokens.reduce((sum, t) => sum + t.value, 0);
-      const ethToken = updatedTokens.find((t) => t.symbol === "ETH");
-      const newEthValue = ethToken ? ethToken.value : w.ethValue;
-      const prevTotal = w.totalUsd || 1;
-      const newChange24h = parseFloat((((newTotalUsd - prevTotal) / prevTotal) * 100 + w.change24h * 0.95).toFixed(2));
+      const newEthBalance = balanceMap[w.address.toLowerCase()] ?? w.ethBalance;
+      const newEthValue = newEthBalance * ethPrice;
+      // Update ETH token in tokens array
+      const updatedTokens = w.tokens.length > 0
+        ? w.tokens.map((t) => t.symbol === "ETH"
+          ? { ...t, qty: parseFloat(newEthBalance.toFixed(6)), price: ethPrice, value: parseFloat(newEthValue.toFixed(2)) }
+          : t)
+        : [{ symbol: "ETH", name: "Ethereum", qty: parseFloat(newEthBalance.toFixed(6)), price: ethPrice, value: parseFloat(newEthValue.toFixed(2)), change: 0 }];
+      const newTotalUsd = updatedTokens.reduce((s, t) => s + t.value, 0);
+      const prevTotal = w.totalUsd || 0;
+      const newChange24h = prevTotal > 0 ? parseFloat((((newTotalUsd - prevTotal) / prevTotal) * 100).toFixed(2)) : 0;
       return {
         ...w,
+        ethBalance: parseFloat(newEthBalance.toFixed(6)),
+        ethValue: parseFloat(newEthValue.toFixed(2)),
         tokens: updatedTokens,
         totalUsd: parseFloat(newTotalUsd.toFixed(2)),
-        ethValue: parseFloat(newEthValue.toFixed(2)),
         change24h: newChange24h,
         lastUpdated: "Just now",
       };
     });
-  };
+  }, []);
 
-  const handleRefresh = () => {
+  // Full fetch for a single wallet (balance + txns + tokens) — used on add
+  const fetchFullWalletData = useCallback(async (wallet) => {
+    const chainData = await fetchWalletFromChain(wallet.address);
+    if (!chainData) return wallet;
+    return { ...wallet, ...chainData };
+  }, []);
+
+  const handleRefresh = async () => {
     if (refreshing) return;
     setRefreshing(true);
-    setTimeout(() => {
-      setWallets((prev) => {
-        const updated = refreshWalletValues(prev);
-        recordSnapshot(updated);
-        saveAllWalletsToDb(updated);
-        return updated;
-      });
+    try {
+      const updated = await refreshWalletData(wallets);
+      setWallets(updated);
+      recordSnapshot(updated);
+      saveAllWalletsToDb(updated);
       if (selectedWallet) {
-        setSelectedWallet((sel) => sel ? refreshWalletValues([sel])[0] : null);
+        const sel = updated.find((w) => w.id === selectedWallet.id);
+        if (sel) setSelectedWallet(sel);
       }
-      setRefreshing(false);
-      showToast("Balances updated", "success");
-    }, 800);
+      showToast("Live balances updated from Etherscan", "success");
+    } catch (e) {
+      showToast("Refresh failed: " + e.message, "error");
+    }
+    setRefreshing(false);
   };
 
-  // Auto-refresh timer
+  // Auto-refresh timer — calls real Etherscan API
   useEffect(() => {
-    const timer = setInterval(() => {
-      setWallets((prev) => {
-        const updated = refreshWalletValues(prev);
+    const timer = setInterval(async () => {
+      try {
+        const current = walletsRef.current;
+        const updated = await refreshWalletData(current);
+        setWallets(updated);
         recordSnapshot(updated);
         saveAllWalletsToDb(updated);
-        return updated;
-      });
-      if (selectedWallet) {
-        setSelectedWallet((sel) => sel ? refreshWalletValues([sel])[0] : null);
-      }
+      } catch (e) { console.warn("Auto-refresh failed:", e.message); }
     }, refreshInterval * 1000);
     return () => clearInterval(timer);
-  }, [refreshInterval, recordSnapshot, saveAllWalletsToDb]);
+  }, [refreshInterval, refreshWalletData, recordSnapshot, saveAllWalletsToDb]);
+
+  // Keep a ref to current wallets for auto-refresh
+  const walletsRef = useRef(wallets);
+  useEffect(() => { walletsRef.current = wallets; }, [wallets]);
+
+  // Fetch full data on initial load
+  useEffect(() => {
+    if (!storageReady) return;
+    const fetchInitial = async () => {
+      try {
+        const updated = await refreshWalletData(wallets);
+        setWallets(updated);
+        saveAllWalletsToDb(updated);
+      } catch (e) { console.warn("Initial fetch failed:", e.message); }
+    };
+    fetchInitial();
+  }, [storageReady]); // eslint-disable-line
 
   const handleCopy = (text) => {
     navigator.clipboard?.writeText?.(text);
@@ -678,7 +820,7 @@ export default function WalletWatcher() {
     setTimeout(() => setCopied(false), 1500);
   };
 
-  const handleAddWallet = () => {
+  const handleAddWallet = async () => {
     setAddError("");
     if (!addForm.address.trim()) { setAddError("Please enter a wallet address."); return; }
     if (!validateAddress(addForm.address)) { setAddError("Invalid address format. Must be 0x followed by 40 hex characters (42 total), or 40 hex characters."); return; }
@@ -687,17 +829,25 @@ export default function WalletWatcher() {
     const newWallet = {
       id: Date.now(), address: normalized, label: addForm.label.trim() || "Untitled Wallet",
       chain: addForm.chain, totalUsd: 0, ethBalance: 0, ethValue: 0, change24h: 0, txnCount: 0,
-      tokens: [], transactions: [], lastUpdated: "Just now",
+      tokens: [], transactions: [], lastUpdated: "Loading...",
     };
-    setWallets((prev) => {
-      const updated = [...prev, newWallet];
-      recordSnapshot(updated);
-      return updated;
-    });
-    saveWalletToDb(newWallet);
-    showToast('"' + newWallet.label + '" added to watchlist', "success");
+    // Add wallet immediately (shows "Loading...")
+    setWallets((prev) => [...prev, newWallet]);
+    showToast('Fetching blockchain data for "' + newWallet.label + '"...', "success");
     setAddForm({ address: "", label: "", chain: "Ethereum" });
     setView("watchlist");
+
+    // Fetch real data from Etherscan
+    try {
+      const fullData = await fetchFullWalletData(newWallet);
+      setWallets((prev) => prev.map((w) => w.id === newWallet.id ? fullData : w));
+      saveWalletToDb(fullData);
+      recordSnapshot(wallets);
+      showToast('"' + newWallet.label + '" loaded with live data', "success");
+    } catch (e) {
+      showToast("Added wallet but couldn't fetch data: " + e.message, "error");
+      saveWalletToDb(newWallet);
+    }
   };
 
   const requestDelete = (wallet, e) => { if (e) e.stopPropagation(); setDeleteTarget(wallet); };
@@ -801,9 +951,9 @@ export default function WalletWatcher() {
       {/* ── TOP BAR ── */}
       <div style={S.topBar}><div style={S.topBarInner}>
         <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
-          <span><EthIcon /> ETH Price: <span style={{ color: "#fff", fontWeight: 500 }}>$2,065.56</span> <span style={{ color: "#81c995" }}>(+10.71%)</span></span>
+          <span><EthIcon /> ETH Price: <span style={{ color: "#fff", fontWeight: 500 }}>{liveEthPrice > 0 ? formatUsd(liveEthPrice) : "Loading..."}</span></span>
           <span style={{ color: "#ffffff44" }}>|</span>
-          <span>Gas: <span style={{ color: "#fff", fontWeight: 500 }}>0.232 Gwei</span></span>
+          <span>Gas: <span style={{ color: "#fff", fontWeight: 500 }}>—</span></span>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <span style={{ ...S.badge("default"), background: "rgba(255,255,255,0.12)", color: "#ffffffcc", fontSize: 11 }}>Ethereum Mainnet</span>
@@ -871,7 +1021,7 @@ export default function WalletWatcher() {
             <div style={S.statCard}>
               <div style={S.statLabel}>Total ETH Balance</div>
               <div style={S.statValue}>{totalEth.toFixed(4)} ETH</div>
-              <div style={S.statSub}>{formatUsd(totalEth * 2841.2)} @ $2,841.20/ETH</div>
+              <div style={S.statSub}>{liveEthPrice > 0 ? `${formatUsd(totalEth * liveEthPrice)} @ ${formatUsd(liveEthPrice)}/ETH` : "Fetching price..."}</div>
             </div>
           </div>
           <div style={S.card}>
@@ -922,7 +1072,7 @@ export default function WalletWatcher() {
                   onBlur={(e) => { e.target.style.borderColor = "#d1d5db"; e.target.style.color = "#6c757d"; }}
                 >
                   {REFRESH_OPTIONS.map((s) => (
-                    <option key={s} value={s}>{s}s</option>
+                    <option key={s} value={s}>{s < 60 ? s + "s" : (s / 60) + "m"}</option>
                   ))}
                 </select>
               </div>
