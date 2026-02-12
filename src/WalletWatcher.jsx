@@ -1,0 +1,1158 @@
+import { useState, useEffect, useCallback, useRef } from "react";
+
+// ══════════════════════════════════════════════════════════════
+//  SUPABASE CONFIG — Replace with your project credentials
+// ══════════════════════════════════════════════════════════════
+const SUPABASE_URL = import.meta.env?.VITE_SUPABASE_URL || "https://gmfzbizhlefxapijqnfh.supabase.co";
+const SUPABASE_ANON_KEY = import.meta.env?.VITE_SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdtZnpiaXpobGVmeGFwaWpxbmZoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA4MzcwODQsImV4cCI6MjA4NjQxMzA4NH0.PKN4l3gZujgSDjAPkwWbNEMt4tbQaqSWIl0H2bfQJ0Q";
+
+// Lightweight Supabase REST client (no SDK needed)
+const supabase = {
+  headers: {
+    "Content-Type": "application/json",
+    apikey: SUPABASE_ANON_KEY,
+    Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+    Prefer: "return=representation",
+  },
+  async select(table, query = "") {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${query}`, { headers: this.headers });
+    if (!res.ok) throw new Error(`SELECT ${table}: ${res.statusText}`);
+    return res.json();
+  },
+  async insert(table, rows) {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
+      method: "POST", headers: this.headers, body: JSON.stringify(rows),
+    });
+    if (!res.ok) throw new Error(`INSERT ${table}: ${res.statusText}`);
+    return res.json();
+  },
+  async upsert(table, rows) {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
+      method: "POST",
+      headers: { ...this.headers, Prefer: "return=representation,resolution=merge-duplicates" },
+      body: JSON.stringify(rows),
+    });
+    if (!res.ok) throw new Error(`UPSERT ${table}: ${res.statusText}`);
+    return res.json();
+  },
+  async update(table, match, data) {
+    const params = Object.entries(match).map(([k, v]) => `${k}=eq.${v}`).join("&");
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${params}`, {
+      method: "PATCH", headers: this.headers, body: JSON.stringify(data),
+    });
+    if (!res.ok) throw new Error(`UPDATE ${table}: ${res.statusText}`);
+    return res.json();
+  },
+  async delete(table, match) {
+    const params = Object.entries(match).map(([k, v]) => `${k}=eq.${v}`).join("&");
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${params}`, {
+      method: "DELETE", headers: this.headers,
+    });
+    if (!res.ok) throw new Error(`DELETE ${table}: ${res.statusText}`);
+    return true;
+  },
+};
+
+const isSupabaseConfigured = () =>
+  SUPABASE_URL !== "https://YOUR_PROJECT_ID.supabase.co" && SUPABASE_ANON_KEY !== "YOUR_ANON_KEY_HERE";
+
+// ── MOCK DATA ──
+const INITIAL_WALLETS = [
+  {
+    id: 1,
+    address: "0x742d35Cc6634C0532925a3b844Bc9e7595f2bD18",
+    label: "Main Vault",
+    chain: "Ethereum",
+    totalUsd: 284719.43,
+    ethBalance: 82.45,
+    ethValue: 234215.94,
+    change24h: 3.42,
+    txnCount: 1247,
+    tokens: [
+      { symbol: "ETH", name: "Ethereum", qty: 82.45, price: 2841.2, value: 234215.94, change: 4.1 },
+      { symbol: "USDC", name: "USD Coin", qty: 25000, price: 1.0, value: 25000.0, change: 0.01 },
+      { symbol: "LINK", name: "Chainlink", qty: 1250, price: 15.8, value: 19750.0, change: -2.3 },
+      { symbol: "UNI", name: "Uniswap", qty: 420, price: 13.7, value: 5753.49, change: 1.8 },
+    ],
+    transactions: [
+      { hash: "0xc52af6...810d29", method: "Transfer", block: "24400305", age: "2 mins ago", from: "0x742d35...f2bD18", to: "0x4675C7...0a263", value: "1.5 ETH", fee: "0.00042" },
+      { hash: "0x23cc93...b5ecd", method: "Approve", block: "24400198", age: "18 mins ago", from: "0x742d35...f2bD18", to: "0xA0b869...E7e4c8", value: "0 ETH", fee: "0.00031" },
+      { hash: "0xdc39d7...bf776", method: "Swap", block: "24400102", age: "34 mins ago", from: "0x742d35...f2bD18", to: "0x1231DE...F4EaE", value: "0.5 ETH", fee: "0.00089" },
+      { hash: "0x2ddc45...a2a566", method: "Transfer", block: "24399987", age: "1 hr ago", from: "0x8894E0...02B6e8", to: "0x742d35...f2bD18", value: "5.0 ETH", fee: "0.00038" },
+      { hash: "0xf7a812...c3e901", method: "Transfer", block: "24399801", age: "2 hrs ago", from: "0x742d35...f2bD18", to: "0xdead00...00dead", value: "0.1 ETH", fee: "0.00021" },
+    ],
+    lastUpdated: "2 min ago",
+  },
+  {
+    id: 2,
+    address: "0xAb5801a7D398351b8bE11C439e05C5B3259aeC9B",
+    label: "DeFi Yields",
+    chain: "Ethereum",
+    totalUsd: 47832.18,
+    ethBalance: 8.2,
+    ethValue: 23297.84,
+    change24h: -1.27,
+    txnCount: 342,
+    tokens: [
+      { symbol: "ETH", name: "Ethereum", qty: 8.2, price: 2841.2, value: 23297.84, change: 4.1 },
+      { symbol: "AAVE", name: "Aave", qty: 85, price: 168.5, value: 14322.5, change: -3.4 },
+      { symbol: "DAI", name: "Dai", qty: 10211.84, price: 1.0, value: 10211.84, change: 0.0 },
+    ],
+    transactions: [
+      { hash: "0xaa11bb...223344", method: "Deposit", block: "24400280", age: "5 mins ago", from: "0xAb5801...aeC9B", to: "0x7d2768...3f7b5", value: "2.0 ETH", fee: "0.00067" },
+      { hash: "0xbb22cc...445566", method: "Claim", block: "24400100", age: "38 mins ago", from: "0xAb5801...aeC9B", to: "0x4da27a...1b3f8", value: "0 ETH", fee: "0.00045" },
+    ],
+    lastUpdated: "5 min ago",
+  },
+  {
+    id: 3,
+    address: "0x1234567890abcdef1234567890abcdef12345678",
+    label: "NFT Storage",
+    chain: "Ethereum",
+    totalUsd: 12450.0,
+    ethBalance: 4.38,
+    ethValue: 12444.46,
+    change24h: 7.85,
+    txnCount: 89,
+    tokens: [
+      { symbol: "ETH", name: "Ethereum", qty: 4.38, price: 2841.2, value: 12444.46, change: 4.1 },
+      { symbol: "APE", name: "ApeCoin", qty: 5, price: 1.11, value: 5.54, change: 12.5 },
+    ],
+    transactions: [
+      { hash: "0xdd44ee...667788", method: "Transfer", block: "24400290", age: "3 mins ago", from: "0x123456...45678", to: "0xBC4CA0...a3F13", value: "0 ETH", fee: "0.00052" },
+    ],
+    lastUpdated: "1 min ago",
+  },
+];
+
+const CHAINS = ["Ethereum", "Polygon", "BSC", "Arbitrum", "Optimism"];
+const formatUsd = (n) => "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const validateAddress = (addr) => {
+  const a = addr.trim();
+  return /^0x[a-fA-F0-9]{40}$/i.test(a) || /^[a-fA-F0-9]{40}$/.test(a);
+};
+const normalizeAddress = (addr) => {
+  const a = addr.trim();
+  if (/^[a-fA-F0-9]{40}$/.test(a)) return "0x" + a;
+  if (/^0X/.test(a)) return "0x" + a.slice(2);
+  return a;
+};
+
+const EthIcon = () => (
+  <svg width="12" height="12" viewBox="0 0 256 417" style={{ verticalAlign: "middle", marginRight: 4 }}>
+    <path fill="#343434" d="M127.961 0l-2.795 9.5v275.668l2.795 2.79 127.962-75.638z" />
+    <path fill="#8C8C8C" d="M127.962 0L0 212.32l127.962 75.639V154.158z" />
+    <path fill="#3C3C3B" d="M127.961 312.187l-1.575 1.92v98.199l1.575 4.601L256 236.587z" />
+    <path fill="#8C8C8C" d="M127.962 416.905v-104.72L0 236.585z" />
+  </svg>
+);
+const CopyIcon = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#6c757d" strokeWidth="2" strokeLinecap="round">
+    <rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+  </svg>
+);
+const SearchIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round">
+    <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+  </svg>
+);
+const TrashIcon = ({ color = "#6c757d", size = 15 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
+    <line x1="10" y1="11" x2="10" y2="17" /><line x1="14" y1="11" x2="14" y2="17" />
+  </svg>
+);
+const PlusIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+    <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+  </svg>
+);
+const WalletIcon = () => (
+  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#adb5bd" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="1" y="5" width="22" height="16" rx="2" /><path d="M16 12h.01" /><path d="M1 10h22" />
+  </svg>
+);
+const CheckCircle = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#065f46" strokeWidth="2.5" strokeLinecap="round">
+    <path d="M22 11.08V12a10 10 0 11-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" />
+  </svg>
+);
+const EyeIcon = ({ size = 13, color = "#6c757d" }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" />
+  </svg>
+);
+const EyeOffIcon = ({ size = 13, color = "#6c757d" }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24" />
+    <line x1="1" y1="1" x2="23" y2="23" />
+  </svg>
+);
+
+// ── MASKED ADDRESS COMPONENT ──
+// Blurs all characters except the last 10, with a toggle to reveal the full address
+function MaskedAddress({ address, mono = true, linkStyle = false, fontSize = 13 }) {
+  const [revealed, setRevealed] = useState(false);
+  if (!address) return null;
+  const visibleCount = 10;
+  const hiddenPart = address.slice(0, -visibleCount);
+  const visiblePart = address.slice(-visibleCount);
+
+  const baseStyle = {
+    fontFamily: mono ? "'Roboto Mono', monospace" : "inherit",
+    fontSize,
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 5,
+    color: linkStyle ? "#0784c3" : "#1e2022",
+    cursor: linkStyle ? "pointer" : "default",
+  };
+
+  return (
+    <span style={baseStyle}>
+      {revealed ? (
+        <span>{address}</span>
+      ) : (
+        <span>
+          <span style={{
+            filter: "blur(4.5px)",
+            WebkitFilter: "blur(4.5px)",
+            userSelect: "none",
+            pointerEvents: "none",
+            opacity: 0.6,
+            letterSpacing: "-0.02em",
+          }}>{hiddenPart}</span>
+          <span>{visiblePart}</span>
+        </span>
+      )}
+      <button
+        onClick={(e) => { e.stopPropagation(); setRevealed(!revealed); }}
+        title={revealed ? "Hide address" : "Reveal full address"}
+        style={{
+          background: "none", border: "1px solid transparent", cursor: "pointer",
+          padding: "2px 3px", borderRadius: 4, display: "inline-flex", alignItems: "center",
+          transition: "all 0.15s", flexShrink: 0,
+        }}
+        onMouseEnter={(e) => { e.currentTarget.style.background = "#e9ecef"; e.currentTarget.style.borderColor = "#d1d5db"; }}
+        onMouseLeave={(e) => { e.currentTarget.style.background = "none"; e.currentTarget.style.borderColor = "transparent"; }}
+      >
+        {revealed ? <EyeOffIcon size={12} /> : <EyeIcon size={12} />}
+      </button>
+    </span>
+  );
+}
+
+function Toast({ message, type, visible }) {
+  return (
+    <div style={{
+      position: "fixed", top: 20, right: 20, zIndex: 9999,
+      padding: "12px 20px", borderRadius: 10, fontSize: 13.5, fontWeight: 500,
+      display: "flex", alignItems: "center", gap: 8,
+      boxShadow: "0 4px 24px rgba(0,0,0,0.12), 0 1px 4px rgba(0,0,0,0.08)",
+      transform: visible ? "translateY(0)" : "translateY(-20px)",
+      opacity: visible ? 1 : 0,
+      transition: "all 0.3s cubic-bezier(0.4,0,0.2,1)",
+      pointerEvents: visible ? "auto" : "none",
+      ...(type === "success" ? { background: "#d1fae5", color: "#065f46", border: "1px solid #6ee7b7" } :
+        type === "danger" ? { background: "#fee2e2", color: "#991b1b", border: "1px solid #fca5a5" } :
+        { background: "#e0f2fe", color: "#075985", border: "1px solid #7dd3fc" }),
+    }}>
+      {type === "success" && <CheckCircle />}
+      {type === "danger" && <span style={{ fontSize: 16 }}>🗑</span>}
+      {message}
+    </div>
+  );
+}
+
+function DeleteModal({ wallet, onConfirm, onCancel }) {
+  if (!wallet) return null;
+  return (
+    <div style={{
+      position: "fixed", inset: 0, zIndex: 9000, display: "flex", alignItems: "center", justifyContent: "center",
+      background: "rgba(0,0,0,0.4)", backdropFilter: "blur(2px)",
+    }} onClick={onCancel}>
+      <div style={{
+        background: "#fff", borderRadius: 14, width: "100%", maxWidth: 440, overflow: "hidden",
+        boxShadow: "0 20px 60px rgba(0,0,0,0.2)", animation: "modalIn 0.2s ease",
+      }} onClick={(e) => e.stopPropagation()}>
+        <div style={{
+          padding: "18px 24px", borderBottom: "1px solid #e9ecef",
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{
+              width: 36, height: 36, borderRadius: "50%", background: "#fee2e2",
+              display: "flex", alignItems: "center", justifyContent: "center",
+            }}><TrashIcon color="#dc3545" size={18} /></div>
+            <span style={{ fontSize: 16, fontWeight: 700, color: "#1e2022" }}>Remove Wallet</span>
+          </div>
+          <button onClick={onCancel} style={{
+            background: "none", border: "none", fontSize: 20, color: "#6c757d", cursor: "pointer",
+            width: 32, height: 32, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center",
+          }}>✕</button>
+        </div>
+        <div style={{ padding: "20px 24px" }}>
+          <p style={{ fontSize: 14, color: "#495057", lineHeight: 1.6, margin: "0 0 16px" }}>
+            Are you sure you want to remove <strong>{wallet.label}</strong> from your watchlist? This action cannot be undone.
+          </p>
+          <div style={{ background: "#f8f9fa", border: "1px solid #e9ecef", borderRadius: 10, padding: "14px 16px" }}>
+            <div style={{ fontSize: 13, color: "#6c757d", marginBottom: 4 }}>Wallet Address</div>
+            <div style={{ fontSize: 13, color: "#1e2022", wordBreak: "break-all" }}><MaskedAddress address={wallet.address} fontSize={13} /></div>
+            <div style={{ display: "flex", gap: 16, marginTop: 10 }}>
+              <div>
+                <div style={{ fontSize: 11, color: "#6c757d", textTransform: "uppercase", letterSpacing: "0.04em" }}>Balance</div>
+                <div style={{ fontSize: 14, fontWeight: 600, color: "#1e2022" }}>{formatUsd(wallet.totalUsd)}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 11, color: "#6c757d", textTransform: "uppercase", letterSpacing: "0.04em" }}>ETH</div>
+                <div style={{ fontSize: 14, fontWeight: 600, color: "#1e2022" }}>{wallet.ethBalance.toFixed(4)}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 11, color: "#6c757d", textTransform: "uppercase", letterSpacing: "0.04em" }}>Chain</div>
+                <div style={{ fontSize: 14, fontWeight: 600, color: "#1e2022" }}>{wallet.chain}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div style={{
+          padding: "16px 24px", borderTop: "1px solid #e9ecef",
+          display: "flex", justifyContent: "flex-end", gap: 10, background: "#f8f9fa",
+        }}>
+          <button onClick={onCancel} style={{
+            padding: "9px 20px", fontSize: 13.5, fontWeight: 500, color: "#495057", background: "#fff",
+            border: "1px solid #d1d5db", borderRadius: 8, cursor: "pointer", fontFamily: "inherit",
+          }}>Cancel</button>
+          <button onClick={onConfirm} style={{
+            padding: "9px 20px", fontSize: 13.5, fontWeight: 600, color: "#fff", background: "#dc3545",
+            border: "none", borderRadius: 8, cursor: "pointer", fontFamily: "inherit",
+            display: "flex", alignItems: "center", gap: 6,
+          }}><TrashIcon color="#fff" size={14} /> Remove Wallet</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function WalletWatcher() {
+  const [view, setView] = useState("watchlist");
+  const [wallets, setWallets] = useState(INITIAL_WALLETS);
+  const [storageReady, setStorageReady] = useState(false);
+  const [dbStatus, setDbStatus] = useState("loading"); // "loading" | "connected" | "local" | "offline"
+  const prevBalancesRef = useRef({});
+  const [balanceDir, setBalanceDir] = useState({});
+
+  // ── SUPABASE: Convert DB row to app wallet object ──
+  const dbRowToWallet = (row, tokens = [], transactions = []) => ({
+    id: row.id, address: row.address, label: row.label, chain: row.chain,
+    totalUsd: parseFloat(row.total_usd), ethBalance: parseFloat(row.eth_balance),
+    ethValue: parseFloat(row.eth_value), change24h: parseFloat(row.change_24h),
+    txnCount: row.txn_count,
+    tokens: tokens.map((t) => ({
+      symbol: t.symbol, name: t.name, qty: parseFloat(t.qty),
+      price: parseFloat(t.price), value: parseFloat(t.value), change: parseFloat(t.change),
+    })),
+    transactions, lastUpdated: row.last_updated || "Never",
+  });
+
+  const walletToDbRow = (w) => ({
+    id: w.id, address: w.address, label: w.label, chain: w.chain,
+    total_usd: w.totalUsd, eth_balance: w.ethBalance, eth_value: w.ethValue,
+    change_24h: w.change24h, txn_count: w.txnCount, last_updated: w.lastUpdated,
+  });
+
+  const tokenToDbRow = (t, walletId) => ({
+    wallet_id: walletId, symbol: t.symbol, name: t.name,
+    qty: t.qty, price: t.price, value: t.value, change: t.change,
+  });
+
+  // ── LOCAL STORAGE helpers (fallback for artifact sandbox) ──
+  const localSave = async (key, data) => {
+    try { if (window.storage) await window.storage.set(key, JSON.stringify(data)); } catch (e) {}
+  };
+  const localLoad = async (key) => {
+    try {
+      if (!window.storage) return null;
+      const r = await window.storage.get(key);
+      return r && r.value ? JSON.parse(r.value) : null;
+    } catch (e) { return null; }
+  };
+
+  // ── DUAL-MODE: Try Supabase, fall back to local storage ──
+  useEffect(() => {
+    const loadData = async () => {
+      // 1) Try Supabase first
+      if (isSupabaseConfigured()) {
+        try {
+          const dbWallets = await supabase.select("wallets", "order=created_at.asc");
+          if (dbWallets.length > 0) {
+            const dbTokens = await supabase.select("tokens", "order=id.asc");
+            const loaded = dbWallets.map((row) => {
+              const wTokens = dbTokens.filter((t) => t.wallet_id === row.id);
+              const mockW = INITIAL_WALLETS.find((m) => m.id === row.id);
+              return dbRowToWallet(row, wTokens, mockW?.transactions || []);
+            });
+            setWallets(loaded);
+          } else {
+            // First run: seed Supabase with initial data
+            const rows = INITIAL_WALLETS.map(walletToDbRow);
+            await supabase.insert("wallets", rows);
+            for (const w of INITIAL_WALLETS) {
+              if (w.tokens.length > 0) await supabase.insert("tokens", w.tokens.map((t) => tokenToDbRow(t, w.id)));
+            }
+          }
+          setDbStatus("connected");
+          setStorageReady(true);
+          return;
+        } catch (e) {
+          console.warn("Supabase unavailable, trying local storage:", e.message);
+        }
+      }
+
+      // 2) Fall back to window.storage (artifact persistent storage)
+      const localWallets = await localLoad("wallets");
+      if (localWallets && Array.isArray(localWallets) && localWallets.length > 0) {
+        setWallets(localWallets);
+      }
+      setDbStatus(window.storage ? "local" : "offline");
+      setStorageReady(true);
+    };
+    loadData();
+  }, []);
+
+  // ── LOCAL: Auto-save wallets to local storage when in local/offline mode ──
+  useEffect(() => {
+    if (!storageReady || dbStatus === "connected") return;
+    localSave("wallets", wallets);
+  }, [wallets, storageReady, dbStatus]);
+
+  // ── SUPABASE: Save wallet to database ──
+  const saveWalletToDb = useCallback(async (wallet) => {
+    if (dbStatus !== "connected") return;
+    try {
+      await supabase.upsert("wallets", [walletToDbRow(wallet)]);
+      if (wallet.tokens.length > 0) await supabase.upsert("tokens", wallet.tokens.map((t) => tokenToDbRow(t, wallet.id)));
+    } catch (e) { console.warn("Save wallet failed:", e.message); }
+  }, [dbStatus]);
+
+  // ── SUPABASE: Batch save all wallets ──
+  const saveAllWalletsToDb = useCallback(async (walletList) => {
+    if (dbStatus !== "connected") return;
+    try {
+      await supabase.upsert("wallets", walletList.map(walletToDbRow));
+      const allTokens = walletList.flatMap((w) => w.tokens.map((t) => tokenToDbRow(t, w.id)));
+      if (allTokens.length > 0) await supabase.upsert("tokens", allTokens);
+    } catch (e) { console.warn("Batch save failed:", e.message); }
+  }, [dbStatus]);
+
+  // ── SUPABASE: Delete wallet from database ──
+  const deleteWalletFromDb = useCallback(async (walletId) => {
+    if (dbStatus !== "connected") return;
+    try {
+      await supabase.delete("tokens", { wallet_id: walletId });
+      await supabase.delete("wallets", { id: walletId });
+    } catch (e) { console.warn("Delete wallet failed:", e.message); }
+  }, [dbStatus]);
+
+  // ── DUAL: Record history snapshot (Supabase or local) ──
+  const lastSnapshotRef = useRef(0);
+  const recordSnapshot = useCallback(async (walletList) => {
+    const now = Date.now();
+    if (now - lastSnapshotRef.current < 10000) return;
+    lastSnapshotRef.current = now;
+
+    const portfolioTotal = walletList.reduce((s, w) => s + w.totalUsd, 0);
+    const snapData = {
+      timestamp: new Date().toISOString(), portfolioTotal,
+      wallets: walletList.map((w) => ({
+        id: w.id, label: w.label, address: w.address, totalUsd: w.totalUsd,
+        ethBalance: w.ethBalance, ethValue: w.ethValue, change24h: w.change24h,
+        tokens: w.tokens.map((t) => ({ symbol: t.symbol, price: t.price, value: t.value })),
+      })),
+    };
+
+    if (dbStatus === "connected") {
+      // Write to Supabase relational tables
+      try {
+        const [snapshot] = await supabase.insert("snapshots", [{ portfolio_total: portfolioTotal }]);
+        const walletSnaps = walletList.map((w) => ({
+          snapshot_id: snapshot.id, wallet_id: w.id, label: w.label, address: w.address,
+          total_usd: w.totalUsd, eth_balance: w.ethBalance, eth_value: w.ethValue, change_24h: w.change24h,
+        }));
+        const insertedWSnaps = await supabase.insert("wallet_snapshots", walletSnaps);
+        const tokenSnaps = insertedWSnaps.flatMap((ws) => {
+          const wallet = walletList.find((w) => w.id === ws.wallet_id);
+          if (!wallet) return [];
+          return wallet.tokens.map((t) => ({ wallet_snapshot_id: ws.id, symbol: t.symbol, price: t.price, value: t.value }));
+        });
+        if (tokenSnaps.length > 0) await supabase.insert("token_snapshots", tokenSnaps);
+      } catch (e) { console.warn("Snapshot to Supabase failed:", e.message); }
+    } else {
+      // Write to local storage
+      let history = (await localLoad("history")) || [];
+      history.push(snapData);
+      if (history.length > 500) history = history.slice(-500);
+      await localSave("history", history);
+    }
+  }, [dbStatus]);
+
+  // Track balance direction changes
+  useEffect(() => {
+    const prev = prevBalancesRef.current;
+    const dirs = {};
+    wallets.forEach((w) => {
+      if (prev[w.id] !== undefined && w.totalUsd !== prev[w.id]) {
+        dirs[w.id] = w.totalUsd > prev[w.id] ? "up" : "down";
+      } else if (prev[w.id] !== undefined) {
+        dirs[w.id] = balanceDir[w.id] || null;
+      }
+    });
+    setBalanceDir(dirs);
+    const newPrev = {};
+    wallets.forEach((w) => { newPrev[w.id] = w.totalUsd; });
+    prevBalancesRef.current = newPrev;
+  }, [wallets]);
+  const [selectedWallet, setSelectedWallet] = useState(null);
+  const [detailTab, setDetailTab] = useState("transactions");
+  const [addForm, setAddForm] = useState({ address: "", label: "", chain: "Ethereum" });
+  const [addError, setAddError] = useState("");
+  const [copied, setCopied] = useState(false);
+  const [alerts, setAlerts] = useState([
+    { id: 1, walletLabel: "Main Vault", address: "0x742d35...f2bD18", type: "Balance drops below", threshold: "$200,000", active: true },
+    { id: 2, walletLabel: "DeFi Yields", address: "0xAb5801...aeC9B", type: "Balance increases by", threshold: "10%", active: false },
+    { id: 3, walletLabel: "Main Vault", address: "0x742d35...f2bD18", type: "Incoming transfer over", threshold: "1 ETH", active: true },
+  ]);
+  const [toast, setToast] = useState({ message: "", type: "success", visible: false });
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [editing, setEditing] = useState(false);
+  const [editForm, setEditForm] = useState({ address: "", label: "" });
+
+  const startEditing = () => {
+    if (!selectedWallet) return;
+    setEditForm({ address: selectedWallet.address, label: selectedWallet.label });
+    setEditing(true);
+  };
+
+  const saveEdit = () => {
+    const addr = editForm.address.trim();
+    if (!validateAddress(addr)) { showToast("Invalid wallet address", "error"); return; }
+    const normalized = normalizeAddress(addr);
+    if (wallets.some((wl) => wl.id !== selectedWallet.id && wl.address.toLowerCase() === normalized.toLowerCase())) {
+      showToast("Address already on watchlist", "error"); return;
+    }
+    const updated = {
+      ...selectedWallet,
+      address: normalized,
+      label: editForm.label.trim() || normalized.slice(0, 8) + "...",
+    };
+    setWallets((prev) => {
+      const updatedList = prev.map((wl) => wl.id === updated.id ? updated : wl);
+      recordSnapshot(updatedList);
+      return updatedList;
+    });
+    saveWalletToDb(updated);
+    setSelectedWallet(updated);
+    setEditing(false);
+    showToast("Wallet updated", "success");
+  };
+
+  const cancelEdit = () => setEditing(false);
+  const [sortOrder, setSortOrder] = useState("default"); // "default" | "desc" | "asc"
+
+  const showToast = useCallback((message, type = "success") => {
+    setToast({ message, type, visible: true });
+    setTimeout(() => setToast((t) => ({ ...t, visible: false })), 2800);
+  }, []);
+
+  const totalPortfolio = wallets.reduce((s, w) => s + w.totalUsd, 0);
+  const totalEth = wallets.reduce((s, w) => s + w.ethBalance, 0);
+
+  const sortedWallets = sortOrder === "default" ? wallets :
+    [...wallets].sort((a, b) => sortOrder === "desc" ? b.totalUsd - a.totalUsd : a.totalUsd - b.totalUsd);
+
+  const cycleSortOrder = () => setSortOrder((prev) => prev === "default" ? "desc" : prev === "desc" ? "asc" : "default");
+  const sortLabel = sortOrder === "default" ? "" : sortOrder === "desc" ? ": High→Low" : ": Low→High";
+
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshInterval, setRefreshInterval] = useState(15);
+  const REFRESH_OPTIONS = [2, 5, 7, 10, 12, 15];
+
+  // Simulate fetching latest wallet values with price fluctuations
+  const refreshWalletValues = (walletList) => {
+    return walletList.map((w) => {
+      if (w.tokens.length === 0) return { ...w, lastUpdated: "Just now" };
+      const updatedTokens = w.tokens.map((t) => {
+        const pctChange = (Math.random() - 0.48) * 2.5; // slight upward bias, range ~-1.2% to +1.3%
+        const newPrice = Math.max(0.001, t.price * (1 + pctChange / 100));
+        const newValue = t.qty * newPrice;
+        const newChange = parseFloat((t.change + pctChange * 0.3).toFixed(2));
+        return { ...t, price: parseFloat(newPrice.toFixed(4)), value: parseFloat(newValue.toFixed(2)), change: newChange };
+      });
+      const newTotalUsd = updatedTokens.reduce((sum, t) => sum + t.value, 0);
+      const ethToken = updatedTokens.find((t) => t.symbol === "ETH");
+      const newEthValue = ethToken ? ethToken.value : w.ethValue;
+      const prevTotal = w.totalUsd || 1;
+      const newChange24h = parseFloat((((newTotalUsd - prevTotal) / prevTotal) * 100 + w.change24h * 0.95).toFixed(2));
+      return {
+        ...w,
+        tokens: updatedTokens,
+        totalUsd: parseFloat(newTotalUsd.toFixed(2)),
+        ethValue: parseFloat(newEthValue.toFixed(2)),
+        change24h: newChange24h,
+        lastUpdated: "Just now",
+      };
+    });
+  };
+
+  const handleRefresh = () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    setTimeout(() => {
+      setWallets((prev) => {
+        const updated = refreshWalletValues(prev);
+        recordSnapshot(updated);
+        saveAllWalletsToDb(updated);
+        return updated;
+      });
+      if (selectedWallet) {
+        setSelectedWallet((sel) => sel ? refreshWalletValues([sel])[0] : null);
+      }
+      setRefreshing(false);
+      showToast("Balances updated", "success");
+    }, 800);
+  };
+
+  // Auto-refresh timer
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setWallets((prev) => {
+        const updated = refreshWalletValues(prev);
+        recordSnapshot(updated);
+        saveAllWalletsToDb(updated);
+        return updated;
+      });
+      if (selectedWallet) {
+        setSelectedWallet((sel) => sel ? refreshWalletValues([sel])[0] : null);
+      }
+    }, refreshInterval * 1000);
+    return () => clearInterval(timer);
+  }, [refreshInterval, recordSnapshot, saveAllWalletsToDb]);
+
+  const handleCopy = (text) => {
+    navigator.clipboard?.writeText?.(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+
+  const handleAddWallet = () => {
+    setAddError("");
+    if (!addForm.address.trim()) { setAddError("Please enter a wallet address."); return; }
+    if (!validateAddress(addForm.address)) { setAddError("Invalid address format. Must be 0x followed by 40 hex characters (42 total), or 40 hex characters."); return; }
+    const normalized = normalizeAddress(addForm.address);
+    if (wallets.find((w) => w.address.toLowerCase() === normalized.toLowerCase())) { setAddError("This wallet is already on your watchlist."); return; }
+    const newWallet = {
+      id: Date.now(), address: normalized, label: addForm.label.trim() || "Untitled Wallet",
+      chain: addForm.chain, totalUsd: 0, ethBalance: 0, ethValue: 0, change24h: 0, txnCount: 0,
+      tokens: [], transactions: [], lastUpdated: "Just now",
+    };
+    setWallets((prev) => {
+      const updated = [...prev, newWallet];
+      recordSnapshot(updated);
+      return updated;
+    });
+    saveWalletToDb(newWallet);
+    showToast('"' + newWallet.label + '" added to watchlist', "success");
+    setAddForm({ address: "", label: "", chain: "Ethereum" });
+    setView("watchlist");
+  };
+
+  const requestDelete = (wallet, e) => { if (e) e.stopPropagation(); setDeleteTarget(wallet); };
+  const confirmDelete = () => {
+    if (!deleteTarget) return;
+    const label = deleteTarget.label;
+    const deletedId = deleteTarget.id;
+    setWallets((prev) => {
+      const updated = prev.filter((w) => w.id !== deletedId);
+      recordSnapshot(updated);
+      return updated;
+    });
+    deleteWalletFromDb(deletedId);
+    if (selectedWallet?.id === deletedId) { setSelectedWallet(null); setView("watchlist"); }
+    setDeleteTarget(null);
+    showToast('"' + label + '" removed from watchlist', "danger");
+  };
+  const cancelDelete = () => setDeleteTarget(null);
+
+  const S = {
+    page: { fontFamily: "'Roboto', 'Helvetica Neue', Arial, sans-serif", background: "#f8f9fa", minHeight: "100vh", color: "#1e2022", fontSize: 14, lineHeight: 1.5 },
+    topBar: { background: "#21325b", color: "#ffffffcc", fontSize: 12, padding: "6px 0", borderBottom: "1px solid #1a2847" },
+    topBarInner: { maxWidth: 940, margin: "0 auto", padding: "0 16px", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 },
+    navBar: { background: "#fff", borderBottom: "1px solid #e9ecef", position: "sticky", top: 0, zIndex: 100 },
+    navInner: { maxWidth: 940, margin: "0 auto", padding: "0 16px", display: "flex", alignItems: "center", justifyContent: "space-between", height: 56 },
+    logo: { display: "flex", alignItems: "center", gap: 8, cursor: "pointer" },
+    logoMark: { width: 28, height: 28, borderRadius: 6, background: "linear-gradient(135deg, #21325b 0%, #3b5998 100%)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 800, fontSize: 14 },
+    logoLabel: { fontWeight: 700, fontSize: 16, color: "#21325b" },
+    navLinks: { display: "flex", gap: 2 },
+    navLink: (active) => ({ padding: "8px 14px", fontSize: 13.5, fontWeight: active ? 600 : 400, color: active ? "#0784c3" : "#6c757d", background: active ? "#e8f4fd" : "transparent", borderRadius: 8, border: "none", cursor: "pointer", fontFamily: "inherit" }),
+    hero: { background: "linear-gradient(160deg, #21325b 0%, #3b5998 100%)", padding: "32px 0 38px" },
+    heroInner: { maxWidth: 940, margin: "0 auto", padding: "0 16px" },
+    searchRow: { display: "flex", gap: 0, maxWidth: 680 },
+    searchInput: { flex: 1, padding: "12px 16px", fontSize: 14, fontFamily: "'Roboto Mono', monospace", border: "2px solid transparent", borderRight: "none", borderRadius: "8px 0 0 8px", outline: "none", background: "#fff", color: "#1e2022" },
+    searchBtn: { padding: "0 20px", background: "#3498db", color: "#fff", border: "none", borderRadius: "0 8px 8px 0", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" },
+    content: { maxWidth: 940, margin: "0 auto", padding: "20px 16px 40px" },
+    card: { background: "#fff", border: "1px solid #e9ecef", borderRadius: 12, overflow: "hidden", marginBottom: 16 },
+    cardHeader: { padding: "14px 20px", borderBottom: "1px solid #e9ecef", display: "flex", justifyContent: "space-between", alignItems: "center" },
+    cardTitle: { fontSize: 14, fontWeight: 600, color: "#1e2022" },
+    statsGrid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 },
+    statCard: { background: "#fff", border: "1px solid #e9ecef", borderRadius: 12, padding: "16px 20px" },
+    statLabel: { fontSize: 12, color: "#6c757d", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 6, fontWeight: 500 },
+    statValue: { fontSize: 20, fontWeight: 700, color: "#1e2022" },
+    statSub: { fontSize: 12, color: "#6c757d", marginTop: 4 },
+    table: { width: "100%", borderCollapse: "collapse", fontSize: 13 },
+    th: { textAlign: "left", padding: "10px 16px", fontWeight: 600, color: "#6c757d", fontSize: 12, textTransform: "uppercase", letterSpacing: "0.03em", borderBottom: "2px solid #e9ecef", background: "#f8f9fa", whiteSpace: "nowrap" },
+    td: { padding: "12px 16px", borderBottom: "1px solid #f1f3f5", verticalAlign: "middle" },
+    link: { color: "#0784c3", textDecoration: "none", cursor: "pointer" },
+    badge: (type) => ({ display: "inline-block", padding: "2px 8px", borderRadius: 6, fontSize: 11.5, fontWeight: 500, ...(type === "success" ? { background: "#d1fae5", color: "#065f46" } : type === "danger" ? { background: "#fee2e2", color: "#991b1b" } : type === "info" ? { background: "#e0f2fe", color: "#075985" } : type === "warning" ? { background: "#fef3c7", color: "#92400e" } : { background: "#f1f3f5", color: "#6c757d" }) }),
+    methodBadge: { display: "inline-block", padding: "2px 8px", borderRadius: 6, fontSize: 11, fontWeight: 500, background: "#fef3c7", color: "#92400e", minWidth: 60, textAlign: "center" },
+    tabRow: { display: "flex", gap: 0, borderBottom: "2px solid #e9ecef", padding: "0 20px", background: "#fff" },
+    tab: (active) => ({ padding: "12px 18px", fontSize: 13, fontWeight: active ? 600 : 400, color: active ? "#0784c3" : "#6c757d", borderBottom: active ? "2px solid #0784c3" : "2px solid transparent", marginBottom: -2, cursor: "pointer", background: "transparent", border: "none", fontFamily: "inherit" }),
+    overviewRow: { display: "flex", padding: "11px 20px", borderBottom: "1px solid #f1f3f5", fontSize: 13.5 },
+    overviewLabel: { width: 180, color: "#6c757d", flexShrink: 0 },
+    overviewValue: { flex: 1, color: "#1e2022", wordBreak: "break-all" },
+    formGroup: { marginBottom: 16 },
+    label: { display: "block", fontSize: 13, fontWeight: 500, color: "#1e2022", marginBottom: 6 },
+    input: { width: "100%", padding: "10px 14px", fontSize: 14, border: "1px solid #d1d5db", borderRadius: 8, outline: "none", fontFamily: "inherit", color: "#1e2022", background: "#fff", transition: "border-color 0.15s, box-shadow 0.15s", boxSizing: "border-box" },
+    btnPrimary: { padding: "10px 24px", fontSize: 14, fontWeight: 600, color: "#fff", background: "#0784c3", border: "none", borderRadius: 8, cursor: "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 6 },
+    btnOutline: { padding: "8px 16px", fontSize: 13, fontWeight: 500, color: "#0784c3", background: "#fff", border: "1px solid #0784c3", borderRadius: 8, cursor: "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 6 },
+    btnDanger: { padding: "8px 16px", fontSize: 13, fontWeight: 500, color: "#dc3545", background: "#fff", border: "1px solid #dc3545", borderRadius: 8, cursor: "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 6 },
+    chip: (active) => ({ padding: "6px 14px", fontSize: 13, fontWeight: 500, borderRadius: 8, border: "1px solid " + (active ? "#0784c3" : "#d1d5db"), background: active ? "#e0f2fe" : "#fff", color: active ? "#0784c3" : "#6c757d", cursor: "pointer", fontFamily: "inherit" }),
+    deleteBtn: { background: "none", border: "1px solid transparent", cursor: "pointer", padding: "5px 7px", borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.15s" },
+    infoBox: (type) => ({ padding: "12px 16px", borderRadius: 8, fontSize: 13, lineHeight: 1.5, ...(type === "error" ? { background: "#fee2e2", border: "1px solid #fca5a5", color: "#991b1b" } : type === "success" ? { background: "#d1fae5", border: "1px solid #6ee7b7", color: "#065f46" } : { background: "#e0f2fe", border: "1px solid #7dd3fc", color: "#075985" }) }),
+    mono: { fontFamily: "'Roboto Mono', monospace", fontSize: 13 },
+    muted: { color: "#6c757d" },
+    breadcrumb: { fontSize: 13, color: "#6c757d", marginBottom: 16, display: "flex", alignItems: "center", gap: 6 },
+    breadcrumbLink: { color: "#0784c3", cursor: "pointer" },
+    toggleOuter: (on) => ({ width: 40, height: 22, borderRadius: 11, cursor: "pointer", border: "none", background: on ? "#0784c3" : "#d1d5db", position: "relative", display: "inline-flex", alignItems: "center", transition: "all 0.2s" }),
+    toggleDot: (on) => ({ width: 16, height: 16, borderRadius: 8, background: "#fff", position: "absolute", top: 3, left: on ? 21 : 3, transition: "all 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.15)" }),
+    emptyState: { padding: "60px 20px", textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center", gap: 12 },
+  };
+
+  // Hero search state lifted up
+  const [heroSearch, setHeroSearch] = useState("");
+  const handleHeroSearch = () => {
+    if (!heroSearch.trim()) return;
+    const found = wallets.find((w) => w.address.toLowerCase() === normalizeAddress(heroSearch).toLowerCase());
+    if (found) { setSelectedWallet(found); setView("detail"); }
+    else if (validateAddress(heroSearch.trim())) { setAddForm({ address: normalizeAddress(heroSearch), label: "", chain: "Ethereum" }); setView("add"); }
+  };
+
+  const w = selectedWallet;
+
+  return (
+    <div style={S.page}>
+      <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;600;700&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet" />
+      <style>{`
+        * { box-sizing: border-box; margin: 0; }
+        button:hover { opacity: 0.9; }
+        table tr:hover td { background: #f8f9fa; }
+        input::placeholder { color: #adb5bd; }
+        ::-webkit-scrollbar { height: 6px; width: 6px; }
+        ::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 3px; }
+        @keyframes modalIn { from { opacity: 0; transform: scale(0.95) translateY(10px); } to { opacity: 1; transform: scale(1) translateY(0); } }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+      `}</style>
+      <Toast message={toast.message} type={toast.type} visible={toast.visible} />
+      <DeleteModal wallet={deleteTarget} onConfirm={confirmDelete} onCancel={cancelDelete} />
+
+      {/* ── TOP BAR ── */}
+      <div style={S.topBar}><div style={S.topBarInner}>
+        <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
+          <span><EthIcon /> ETH Price: <span style={{ color: "#fff", fontWeight: 500 }}>$2,065.56</span> <span style={{ color: "#81c995" }}>(+10.71%)</span></span>
+          <span style={{ color: "#ffffff44" }}>|</span>
+          <span>Gas: <span style={{ color: "#fff", fontWeight: 500 }}>0.232 Gwei</span></span>
+        </div>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <span style={{ ...S.badge("default"), background: "rgba(255,255,255,0.12)", color: "#ffffffcc", fontSize: 11 }}>Ethereum Mainnet</span>
+          <span style={{
+            ...S.badge("default"), fontSize: 10, display: "inline-flex", alignItems: "center", gap: 4,
+            background: dbStatus === "connected" ? "rgba(16,185,129,0.2)" : dbStatus === "local" ? "rgba(59,130,246,0.2)" : dbStatus === "loading" ? "rgba(255,255,255,0.12)" : "rgba(239,68,68,0.2)",
+            color: dbStatus === "connected" ? "#6ee7b7" : dbStatus === "local" ? "#93c5fd" : dbStatus === "loading" ? "#ffffffcc" : "#fca5a5",
+          }}>
+            <span style={{ width: 6, height: 6, borderRadius: "50%", background: dbStatus === "connected" ? "#10b981" : dbStatus === "local" ? "#3b82f6" : dbStatus === "loading" ? "#9ca3af" : "#ef4444" }} />
+            {dbStatus === "connected" ? "DB Connected" : dbStatus === "local" ? "Local Storage" : dbStatus === "loading" ? "Connecting..." : "Offline"}
+          </span>
+        </div>
+      </div></div>
+
+      {/* ── NAV BAR ── */}
+      <div style={S.navBar}><div style={S.navInner}>
+        <div style={S.logo} onClick={() => { setView("watchlist"); setSelectedWallet(null); }}>
+          <div style={S.logoMark}>W</div><span style={S.logoLabel}>Wallet Watcher</span>
+        </div>
+        <div style={S.navLinks}>
+          <button style={S.navLink(view === "watchlist" || view === "detail")} onClick={() => setView("watchlist")}>Watchlist</button>
+          <button style={S.navLink(view === "add")} onClick={() => { setView("add"); setAddError(""); }}>Add Wallet</button>
+          <button style={S.navLink(view === "alerts")} onClick={() => setView("alerts")}>Alerts</button>
+        </div>
+      </div></div>
+
+      {/* ══════════════════════════════════════════ */}
+      {/*   WATCHLIST VIEW                          */}
+      {/* ══════════════════════════════════════════ */}
+      {view === "watchlist" && <>
+        {/* Hero Search */}
+        <div style={S.hero}><div style={S.heroInner}>
+          <div style={{ color: "#fff", fontSize: 20, fontWeight: 400, marginBottom: 14 }}><span style={{ fontWeight: 700 }}>Wallet Watcher</span> — Ethereum Wallet Watchlist</div>
+          <div style={S.searchRow}>
+            <div style={{ flex: 1, position: "relative" }}>
+              <input style={{ ...S.searchInput, width: "100%", paddingRight: heroSearch ? 36 : 16 }} placeholder="Search by Address / ENS Name" value={heroSearch} onChange={(e) => setHeroSearch(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleHeroSearch()}
+                onFocus={(e) => e.target.style.borderColor = "#3498db"} onBlur={(e) => e.target.style.borderColor = "transparent"} />
+              {heroSearch && (
+                <button
+                  onClick={() => setHeroSearch("")}
+                  title="Clear search"
+                  style={{
+                    position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)",
+                    width: 22, height: 22, borderRadius: "50%", border: "none", cursor: "pointer",
+                    background: "#e9ecef", color: "#6c757d", fontSize: 13, fontWeight: 600,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    transition: "all 0.15s", lineHeight: 1, padding: 0,
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = "#dc3545"; e.currentTarget.style.color = "#fff"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = "#e9ecef"; e.currentTarget.style.color = "#6c757d"; }}
+                >✕</button>
+              )}
+            </div>
+            <button style={S.searchBtn} onClick={handleHeroSearch}><SearchIcon /></button>
+          </div>
+        </div></div>
+        <div style={S.content}>
+          <div style={S.statsGrid}>
+            <div style={S.statCard}>
+              <div style={S.statLabel}>Total Portfolio Value</div>
+              <div style={S.statValue}>{formatUsd(totalPortfolio)}</div>
+              <div style={S.statSub}>across {wallets.length} watched wallet{wallets.length !== 1 ? "s" : ""}</div>
+            </div>
+            <div style={S.statCard}>
+              <div style={S.statLabel}>Total ETH Balance</div>
+              <div style={S.statValue}>{totalEth.toFixed(4)} ETH</div>
+              <div style={S.statSub}>{formatUsd(totalEth * 2841.2)} @ $2,841.20/ETH</div>
+            </div>
+          </div>
+          <div style={S.card}>
+            <div style={S.cardHeader}>
+              <span style={S.cardTitle}>My Watchlist ({wallets.length})</span>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <button style={{
+                  padding: "6px 14px", fontSize: 12.5, fontWeight: 500, borderRadius: 8, cursor: "pointer", fontFamily: "inherit",
+                  display: "inline-flex", alignItems: "center", gap: 5,
+                  background: sortOrder !== "default" ? "#e0f2fe" : "#fff",
+                  border: sortOrder !== "default" ? "1px solid #0784c3" : "1px solid #d1d5db",
+                  color: sortOrder !== "default" ? "#0784c3" : "#6c757d",
+                  transition: "all 0.15s",
+                }} onClick={cycleSortOrder} title="Toggle sort by balance">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M11 5h10M11 9h7M11 13h4" /><path d="M3 17l3 3 3-3" /><path d="M6 18V4" />
+                  </svg>
+                  Order{sortLabel}
+                </button>
+                <button style={{
+                  width: 34, height: 34, borderRadius: 8, cursor: refreshing ? "default" : "pointer",
+                  display: "inline-flex", alignItems: "center", justifyContent: "center",
+                  background: "#fff", border: "1px solid #d1d5db", color: "#6c757d",
+                  transition: "all 0.15s", padding: 0, opacity: refreshing ? 0.6 : 1,
+                }} onClick={handleRefresh} title="Refresh balances"
+                  onMouseEnter={(e) => { if (!refreshing) { e.currentTarget.style.background = "#e0f2fe"; e.currentTarget.style.borderColor = "#0784c3"; e.currentTarget.style.color = "#0784c3"; } }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; e.currentTarget.style.borderColor = "#d1d5db"; e.currentTarget.style.color = "#6c757d"; }}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"
+                    style={{ animation: refreshing ? "spin 0.8s linear infinite" : "none" }}>
+                    <path d="M21.5 2v6h-6" /><path d="M2.5 22v-6h6" />
+                    <path d="M2.8 10a10 10 0 0116.8-4.3L21.5 8" /><path d="M21.2 14a10 10 0 01-16.8 4.3L2.5 16" />
+                  </svg>
+                </button>
+                <select
+                  value={refreshInterval}
+                  onChange={(e) => setRefreshInterval(Number(e.target.value))}
+                  title="Auto-refresh interval"
+                  style={{
+                    padding: "6px 8px", fontSize: 12, fontWeight: 500, borderRadius: 8,
+                    border: "1px solid #d1d5db", background: "#fff", color: "#6c757d",
+                    cursor: "pointer", fontFamily: "inherit", outline: "none",
+                    appearance: "none", WebkitAppearance: "none",
+                    backgroundImage: "url(\"data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%236c757d' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E\")",
+                    backgroundRepeat: "no-repeat", backgroundPosition: "right 8px center",
+                    paddingRight: 24, transition: "all 0.15s",
+                  }}
+                  onFocus={(e) => { e.target.style.borderColor = "#0784c3"; e.target.style.color = "#0784c3"; }}
+                  onBlur={(e) => { e.target.style.borderColor = "#d1d5db"; e.target.style.color = "#6c757d"; }}
+                >
+                  {REFRESH_OPTIONS.map((s) => (
+                    <option key={s} value={s}>{s}s</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            {wallets.length > 0 ? (
+              <div style={{ overflowX: "auto" }}>
+                <table style={S.table}>
+                  <thead><tr>
+                    <th style={S.th}></th><th style={S.th}>Nickname</th><th style={S.th}>Address</th><th style={S.th}>Chain</th>
+                    <th style={{ ...S.th, textAlign: "right" }}>Balance (USD)</th><th style={{ ...S.th, textAlign: "right" }}>ETH Balance</th>
+                    <th style={{ ...S.th, textAlign: "right" }}>24h Change</th><th style={{ ...S.th, textAlign: "center" }}>Txns</th>
+                    <th style={{ ...S.th, textAlign: "center" }}>Updated</th>
+                  </tr></thead>
+                  <tbody>{sortedWallets.map((wl, i) => (
+                    <tr key={wl.id} style={{ cursor: "pointer" }} onMouseEnter={(e) => e.currentTarget.style.background = "#f8f9fa"} onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}>
+                      <td style={{ ...S.td, color: "#6c757d", fontSize: 12, width: 30, textAlign: "center" }}>{i + 1}</td>
+                      <td style={S.td} onClick={() => { setSelectedWallet(wl); setView("detail"); setEditing(false); }}><span style={{ fontWeight: 600 }}>{wl.label}</span></td>
+                      <td style={S.td} onClick={() => { setSelectedWallet(wl); setView("detail"); setEditing(false); }}><span style={{ ...S.mono, ...S.link }}>...{wl.address.slice(-7)}</span></td>
+                      <td style={S.td}><span style={S.badge("info")}>{wl.chain}</span></td>
+                      <td style={{ ...S.td, textAlign: "right", fontWeight: 600 }}>
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                          {formatUsd(wl.totalUsd)}
+                          {balanceDir[wl.id] === "up" && <span style={{ color: "#065f46", fontSize: "inherit", lineHeight: 1 }}>▲</span>}
+                          {balanceDir[wl.id] === "down" && <span style={{ color: "#991b1b", fontSize: "inherit", lineHeight: 1 }}>▼</span>}
+                        </span>
+                      </td>
+                      <td style={{ ...S.td, textAlign: "right", ...S.mono }}>{wl.ethBalance.toFixed(4)}</td>
+                      <td style={{ ...S.td, textAlign: "right" }}><span style={S.badge(wl.change24h >= 0 ? "success" : "danger")}>{wl.change24h >= 0 ? "+" : ""}{wl.change24h}%</span></td>
+                      <td style={{ ...S.td, textAlign: "center" }}>{wl.txnCount.toLocaleString()}</td>
+                      <td style={{ ...S.td, textAlign: "center", fontSize: 12, color: "#6c757d" }}>{wl.lastUpdated}</td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </div>
+            ) : (
+              <div style={S.emptyState}>
+                <WalletIcon />
+                <div style={{ fontSize: 16, fontWeight: 600, color: "#495057" }}>No wallets on your watchlist</div>
+                <div style={{ fontSize: 13.5, color: "#6c757d", maxWidth: 360, lineHeight: 1.6 }}>Add a public Ethereum wallet address to start monitoring its balance and token holdings in real time.</div>
+                <button style={{ ...S.btnPrimary, marginTop: 8 }} onClick={() => { setView("add"); setAddError(""); }}><PlusIcon /> Add Your First Wallet</button>
+              </div>
+            )}
+          </div>
+          <div style={{ display: "flex", justifyContent: "center", marginTop: 8, marginBottom: 8 }}>
+            <button style={{ ...S.btnPrimary, padding: "12px 32px", fontSize: 15 }} onClick={() => { setView("add"); setAddError(""); }}><PlusIcon /> Add Wallet</button>
+          </div>
+        </div>
+      </>}
+
+      {/* ══════════════════════════════════════════ */}
+      {/*   DETAIL VIEW                             */}
+      {/* ══════════════════════════════════════════ */}
+      {view === "detail" && w && <>
+        <div style={{ background: "#fff", borderBottom: "1px solid #e9ecef" }}>
+          <div style={{ ...S.content, paddingTop: 16, paddingBottom: 0, marginBottom: 0 }}>
+            <div style={S.breadcrumb}><span style={S.breadcrumbLink} onClick={() => { setView("watchlist"); setEditing(false); }}>Watchlist</span><span style={{ color: "#ccc" }}>›</span><span>{w.label}</span></div>
+            {!editing ? (
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16, flexWrap: "wrap", gap: 12 }}>
+                <div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}><span style={S.badge("info")}>{w.chain}</span><span style={{ fontSize: 18, fontWeight: 700 }}>{w.label}</span></div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <MaskedAddress address={w.address} fontSize={13.5} />
+                    <button style={{ background: "none", border: "none", cursor: "pointer", padding: 2 }} onClick={() => handleCopy(w.address)} title="Copy"><CopyIcon /></button>
+                    {copied && <span style={{ fontSize: 11, color: "#065f46" }}>Copied!</span>}
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <a href={"https://etherscan.io/address/" + w.address} target="_blank" rel="noopener noreferrer" style={{ ...S.btnOutline, textDecoration: "none", fontSize: 12, padding: "6px 12px" }}>View on Etherscan ↗</a>
+                  <button style={{ ...S.btnOutline, fontSize: 12, padding: "6px 12px", display: "inline-flex", alignItems: "center", gap: 5 }} onClick={startEditing}>
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
+                    </svg>
+                    Edit
+                  </button>
+                  <button style={{ ...S.btnDanger, fontSize: 12, padding: "6px 12px" }} onClick={(e) => requestDelete(w, e)}><TrashIcon color="#dc3545" size={13} /> Remove</button>
+                </div>
+              </div>
+            ) : (
+              <div style={{ marginBottom: 16, background: "#f8f9fa", borderRadius: 10, padding: 20, border: "1px solid #e9ecef" }}>
+                <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 14, display: "flex", alignItems: "center", gap: 6 }}>
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#0784c3" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
+                  </svg>
+                  Edit Wallet
+                </div>
+                <div style={S.formGroup}>
+                  <label style={S.label}>Wallet Address</label>
+                  <input style={{ ...S.input, fontFamily: "'Roboto Mono', monospace" }} value={editForm.address}
+                    onChange={(e) => setEditForm({ ...editForm, address: e.target.value.trim() })}
+                    onFocus={(e) => { e.target.style.borderColor = "#0784c3"; e.target.style.boxShadow = "0 0 0 3px rgba(7,132,195,0.1)"; }}
+                    onBlur={(e) => { e.target.style.borderColor = "#d1d5db"; e.target.style.boxShadow = "none"; }} />
+                  {editForm.address && !validateAddress(editForm.address) && <div style={{ fontSize: 12, color: "#dc3545", marginTop: 6 }}>⚠ Invalid address format</div>}
+                  {editForm.address && validateAddress(editForm.address) && <div style={{ fontSize: 12, color: "#065f46", marginTop: 6, display: "flex", alignItems: "center", gap: 4 }}><CheckCircle /> Valid address</div>}
+                </div>
+                <div style={S.formGroup}>
+                  <label style={S.label}>Nickname</label>
+                  <input style={S.input} value={editForm.label}
+                    onChange={(e) => setEditForm({ ...editForm, label: e.target.value })}
+                    onFocus={(e) => { e.target.style.borderColor = "#0784c3"; e.target.style.boxShadow = "0 0 0 3px rgba(7,132,195,0.1)"; }}
+                    onBlur={(e) => { e.target.style.borderColor = "#d1d5db"; e.target.style.boxShadow = "none"; }} />
+                </div>
+                <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
+                  <button style={S.btnPrimary} onClick={saveEdit}>Save Changes</button>
+                  <button style={S.btnOutline} onClick={cancelEdit}>Cancel</button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+        <div style={S.content}>
+          <div style={{ ...S.card, marginBottom: 16 }}>
+            <div style={S.cardHeader}><span style={S.cardTitle}>Overview</span></div>
+            <div>
+              <div style={S.overviewRow}><div style={S.overviewLabel}>ETH Balance:</div><div style={S.overviewValue}><EthIcon /> <strong>{w.ethBalance.toFixed(4)} ETH</strong></div></div>
+              <div style={S.overviewRow}><div style={S.overviewLabel}>ETH Value:</div><div style={S.overviewValue}>{formatUsd(w.ethValue)} <span style={S.muted}>(@ $2,841.20/ETH)</span></div></div>
+              <div style={S.overviewRow}><div style={S.overviewLabel}>Total Value:</div><div style={S.overviewValue}><strong>{formatUsd(w.totalUsd)}</strong> <span style={S.badge(w.change24h >= 0 ? "success" : "danger")}>{w.change24h >= 0 ? "+" : ""}{w.change24h}% (24h)</span></div></div>
+              <div style={{ ...S.overviewRow, borderBottom: "none" }}><div style={S.overviewLabel}>Transaction Count:</div><div style={S.overviewValue}>{w.txnCount.toLocaleString()} txns</div></div>
+            </div>
+          </div>
+          <div style={S.card}>
+            <div style={S.tabRow}>
+              <button style={S.tab(detailTab === "transactions")} onClick={() => setDetailTab("transactions")}>Transactions ({w.transactions.length})</button>
+              <button style={S.tab(detailTab === "tokens")} onClick={() => setDetailTab("tokens")}>Token Holdings ({w.tokens.length})</button>
+            </div>
+            {detailTab === "transactions" && (
+              <div style={{ overflowX: "auto" }}>
+                <table style={S.table}>
+                  <thead><tr><th style={S.th}>Txn Hash</th><th style={S.th}>Method</th><th style={S.th}>Block</th><th style={S.th}>Age</th><th style={S.th}>From</th><th style={S.th}></th><th style={S.th}>To</th><th style={{ ...S.th, textAlign: "right" }}>Value</th><th style={{ ...S.th, textAlign: "right" }}>Txn Fee</th></tr></thead>
+                  <tbody>{w.transactions.map((tx, i) => (
+                    <tr key={i}>
+                      <td style={{ ...S.td, ...S.mono }}><span style={S.link}>{tx.hash}</span></td>
+                      <td style={S.td}><span style={S.methodBadge}>{tx.method}</span></td>
+                      <td style={S.td}><span style={S.link}>{tx.block}</span></td>
+                      <td style={{ ...S.td, color: "#6c757d", whiteSpace: "nowrap" }}>{tx.age}</td>
+                      <td style={{ ...S.td, ...S.mono }}><span style={S.link}>{tx.from}</span></td>
+                      <td style={S.td}><span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 22, height: 22, borderRadius: "50%", background: tx.from.includes(w.address.slice(2, 8)) ? "#fee2e2" : "#d1fae5", color: tx.from.includes(w.address.slice(2, 8)) ? "#991b1b" : "#065f46", fontSize: 10, fontWeight: 700 }}>{tx.from.includes(w.address.slice(2, 8)) ? "OUT" : "IN"}</span></td>
+                      <td style={{ ...S.td, ...S.mono }}><span style={S.link}>{tx.to}</span></td>
+                      <td style={{ ...S.td, textAlign: "right", whiteSpace: "nowrap" }}>{tx.value}</td>
+                      <td style={{ ...S.td, textAlign: "right", color: "#6c757d", whiteSpace: "nowrap" }}>{tx.fee}</td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+                {w.transactions.length === 0 && <div style={{ padding: 30, textAlign: "center", color: "#6c757d" }}>No transactions found.</div>}
+              </div>
+            )}
+            {detailTab === "tokens" && (
+              <div style={{ overflowX: "auto" }}>
+                <table style={S.table}>
+                  <thead><tr><th style={S.th}>#</th><th style={S.th}>Token</th><th style={{ ...S.th, textAlign: "right" }}>Quantity</th><th style={{ ...S.th, textAlign: "right" }}>Price</th><th style={{ ...S.th, textAlign: "right" }}>Value</th><th style={{ ...S.th, textAlign: "right" }}>24h %</th></tr></thead>
+                  <tbody>{w.tokens.map((t, i) => (
+                    <tr key={t.symbol}>
+                      <td style={{ ...S.td, color: "#6c757d", width: 30 }}>{i + 1}</td>
+                      <td style={S.td}><div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <div style={{ width: 28, height: 28, borderRadius: "50%", background: "#f1f3f5", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 11 }}>{t.symbol.slice(0, 2)}</div>
+                        <div><div style={{ fontWeight: 600, fontSize: 13.5 }}>{t.name}</div><div style={{ fontSize: 12, color: "#6c757d" }}>{t.symbol}</div></div>
+                      </div></td>
+                      <td style={{ ...S.td, textAlign: "right", ...S.mono }}>{t.qty.toLocaleString()}</td>
+                      <td style={{ ...S.td, textAlign: "right" }}>{formatUsd(t.price)}</td>
+                      <td style={{ ...S.td, textAlign: "right", fontWeight: 600 }}>{formatUsd(t.value)}</td>
+                      <td style={{ ...S.td, textAlign: "right" }}><span style={S.badge(t.change >= 0 ? "success" : "danger")}>{t.change >= 0 ? "+" : ""}{t.change}%</span></td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+                {w.tokens.length === 0 && <div style={{ padding: 30, textAlign: "center", color: "#6c757d" }}>No token holdings found.</div>}
+              </div>
+            )}
+          </div>
+        </div>
+      </>}
+
+      {/* ══════════════════════════════════════════ */}
+      {/*   ADD WALLET VIEW                         */}
+      {/* ══════════════════════════════════════════ */}
+      {view === "add" && <>
+        <div style={{ background: "#fff", borderBottom: "1px solid #e9ecef" }}>
+          <div style={{ ...S.content, paddingTop: 16, paddingBottom: 16, marginBottom: 0 }}>
+            <div style={S.breadcrumb}><span style={S.breadcrumbLink} onClick={() => setView("watchlist")}>Watchlist</span><span style={{ color: "#ccc" }}>›</span><span>Add Wallet</span></div>
+            <div style={{ fontSize: 18, fontWeight: 700 }}>Add Wallet to Watchlist</div>
+            <div style={{ fontSize: 13.5, color: "#6c757d", marginTop: 4 }}>Enter a public wallet address to start monitoring. Find addresses on <a href="https://etherscan.io" target="_blank" rel="noopener" style={{ ...S.link, fontWeight: 500 }}>Etherscan.io ↗</a></div>
+          </div>
+        </div>
+        <div style={S.content}>
+          <div style={S.card}>
+            <div style={S.cardHeader}><span style={S.cardTitle}>Wallet Details</span></div>
+            <div style={{ padding: 20 }}>
+              <div style={S.formGroup}>
+                <label style={S.label}>Wallet Address <span style={{ color: "#dc3545" }}>*</span></label>
+                <input style={{ ...S.input, fontFamily: "'Roboto Mono', monospace" }} placeholder="0x742d35Cc6634C0532925a3b844Bc9e7595f2bD18"
+                  value={addForm.address} onChange={(e) => { setAddForm({ ...addForm, address: e.target.value.trim() }); setAddError(""); }}
+                  onFocus={(e) => { e.target.style.borderColor = "#0784c3"; e.target.style.boxShadow = "0 0 0 3px rgba(7,132,195,0.1)"; }}
+                  onBlur={(e) => { e.target.style.borderColor = "#d1d5db"; e.target.style.boxShadow = "none"; }} />
+                {addForm.address && !validateAddress(addForm.address) && <div style={{ fontSize: 12, color: "#dc3545", marginTop: 6 }}>⚠ Enter a valid address: 0x followed by 40 hex characters, or 40 hex characters.</div>}
+                {addForm.address && validateAddress(addForm.address) && <div style={{ fontSize: 12, color: "#065f46", marginTop: 6, display: "flex", alignItems: "center", gap: 4 }}><CheckCircle /> Valid address format</div>}
+              </div>
+              <div style={S.formGroup}>
+                <label style={S.label}>Nickname <span style={{ color: "#6c757d", fontWeight: 400 }}>(optional)</span></label>
+                <input style={S.input} placeholder="e.g. Trading Wallet, Cold Storage" value={addForm.label} onChange={(e) => setAddForm({ ...addForm, label: e.target.value })}
+                  onFocus={(e) => { e.target.style.borderColor = "#0784c3"; e.target.style.boxShadow = "0 0 0 3px rgba(7,132,195,0.1)"; }}
+                  onBlur={(e) => { e.target.style.borderColor = "#d1d5db"; e.target.style.boxShadow = "none"; }} />
+              </div>
+              <div style={S.formGroup}>
+                <label style={S.label}>Blockchain Network</label>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>{CHAINS.map((c) => (
+                  <button key={c} style={S.chip(addForm.chain === c)} onClick={() => setAddForm({ ...addForm, chain: c })}>{c}</button>
+                ))}</div>
+              </div>
+              {addError && <div style={{ ...S.infoBox("error"), marginBottom: 16 }}>{addError}</div>}
+              <div style={{ display: "flex", gap: 10 }}>
+                <button style={S.btnPrimary} onClick={handleAddWallet}><PlusIcon /> Add to Watchlist</button>
+                <button style={S.btnOutline} onClick={() => setView("watchlist")}>Cancel</button>
+              </div>
+            </div>
+          </div>
+          <div style={S.card}>
+            <div style={S.cardHeader}><span style={S.cardTitle}>🔒 Security Note</span></div>
+            <div style={{ padding: "14px 20px", fontSize: 13, color: "#6c757d", lineHeight: 1.7 }}>Wallet Watcher uses <strong>read-only</strong> public blockchain data via the Etherscan API. We never request or store private keys, seed phrases, or passwords. Only public wallet addresses are used for balance lookups.</div>
+          </div>
+        </div>
+      </>}
+
+      {/* ══════════════════════════════════════════ */}
+      {/*   ALERTS VIEW                             */}
+      {/* ══════════════════════════════════════════ */}
+      {view === "alerts" && <>
+        <div style={{ background: "#fff", borderBottom: "1px solid #e9ecef" }}>
+          <div style={{ ...S.content, paddingTop: 16, paddingBottom: 16, marginBottom: 0 }}>
+            <div style={{ fontSize: 18, fontWeight: 700 }}>Alert Notifications</div>
+            <div style={{ fontSize: 13.5, color: "#6c757d", marginTop: 4 }}>Configure alerts to get notified when wallet balances change.</div>
+          </div>
+        </div>
+        <div style={S.content}>
+          <div style={S.card}>
+            <div style={S.cardHeader}><span style={S.cardTitle}>Active Alerts ({alerts.filter((a) => a.active).length} of {alerts.length})</span><button style={S.btnOutline}><PlusIcon /> New Alert</button></div>
+            <div style={{ overflowX: "auto" }}>
+              <table style={S.table}>
+                <thead><tr><th style={S.th}>Wallet</th><th style={S.th}>Address</th><th style={S.th}>Condition</th><th style={S.th}>Threshold</th><th style={{ ...S.th, textAlign: "center" }}>Status</th><th style={{ ...S.th, textAlign: "center" }}>Toggle</th></tr></thead>
+                <tbody>{alerts.map((a) => (
+                  <tr key={a.id}>
+                    <td style={{ ...S.td, fontWeight: 600 }}>{a.walletLabel}</td>
+                    <td style={{ ...S.td }}><MaskedAddress address={a.address} linkStyle={true} fontSize={13} /></td>
+                    <td style={S.td}>{a.type}</td>
+                    <td style={S.td}><span style={S.badge("warning")}>{a.threshold}</span></td>
+                    <td style={{ ...S.td, textAlign: "center" }}><span style={S.badge(a.active ? "success" : "default")}>{a.active ? "Active" : "Paused"}</span></td>
+                    <td style={{ ...S.td, textAlign: "center" }}><button style={S.toggleOuter(a.active)} onClick={() => setAlerts(alerts.map((x) => x.id === a.id ? { ...x, active: !x.active } : x))}><div style={S.toggleDot(a.active)} /></button></td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            </div>
+          </div>
+          <div style={S.card}>
+            <div style={S.cardHeader}><span style={S.cardTitle}>Available Alert Types</span></div>
+            <div>{[
+              { icon: "📉", title: "Balance Drop", desc: "Trigger when total USD value falls below a specified threshold." },
+              { icon: "📈", title: "Balance Surge", desc: "Trigger when total value increases by a specified percentage." },
+              { icon: "🔔", title: "Token Transfer", desc: "Trigger when tokens are transferred in or out of a watched wallet." },
+              { icon: "⛽", title: "Gas Price Alert", desc: "Trigger when network gas prices drop to your target level." },
+            ].map((t, i) => (
+              <div key={i} style={{ ...S.overviewRow, gap: 12, alignItems: "flex-start" }}>
+                <div style={{ fontSize: 18, lineHeight: 1 }}>{t.icon}</div>
+                <div><div style={{ fontWeight: 600, fontSize: 13.5, marginBottom: 2 }}>{t.title}</div><div style={{ fontSize: 13, color: "#6c757d" }}>{t.desc}</div></div>
+              </div>
+            ))}</div>
+          </div>
+        </div>
+      </>}
+    </div>
+  );
+}
