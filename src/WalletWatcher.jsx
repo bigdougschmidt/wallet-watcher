@@ -65,7 +65,12 @@ const etherscanFetch = async (params) => {
   try {
     const res = await fetch(`https://api.etherscan.io/api?${params}${keyParam}`);
     const data = await res.json();
-    if (data.status === "1" || data.result) return data.result;
+    if (data.status === "1") return data.result;
+    // For proxy module (eth_getTransactionCount etc.), no status field but result exists
+    if (!data.status && data.result) return data.result;
+    // status "0" with array result (e.g. empty token list) is still valid
+    if (data.status === "0" && Array.isArray(data.result)) return data.result;
+    console.warn("Etherscan API non-success:", data.message || data.result, "for", params.split("&action=")[1]?.split("&")[0]);
     return null;
   } catch (e) { console.warn("Etherscan API error:", e.message); return null; }
 };
@@ -118,6 +123,7 @@ const fetchWalletFromChain = async (address) => {
 
     // 5) ERC-20 token transfers → discover token contracts, then fetch real balances
     const tokenTxsRaw = await etherscanFetch(`module=account&action=tokentx&address=${address}&page=1&offset=200&sort=desc`);
+    console.log(`[Chain] Token transfers for ${address.slice(-8)}: type=${typeof tokenTxsRaw}, isArray=${Array.isArray(tokenTxsRaw)}, length=${Array.isArray(tokenTxsRaw) ? tokenTxsRaw.length : 'N/A'}`);
     const tokenContracts = {};
     if (Array.isArray(tokenTxsRaw)) {
       for (const tx of tokenTxsRaw) {
@@ -128,6 +134,7 @@ const fetchWalletFromChain = async (address) => {
         }
       }
     }
+    console.log(`[Chain] Discovered ${Object.keys(tokenContracts).length} unique tokens:`, Object.keys(tokenContracts).join(", "));
 
     // Hardcoded prices for major tokens (fallback for tokens without a price feed)
     const KNOWN_PRICES = {
@@ -140,17 +147,19 @@ const fetchWalletFromChain = async (address) => {
 
     // Fetch actual on-chain balance for each discovered token (up to 10 tokens)
     const tokenList = Object.values(tokenContracts).slice(0, 10);
+    console.log(`[Chain] Fetching balances for ${tokenList.length} tokens...`);
     const erc20Tokens = [];
     for (const tkn of tokenList) {
       await delay(API_DELAY);
       try {
         const rawBal = await etherscanFetch(`module=account&action=tokenbalance&contractaddress=${tkn.contractAddress}&address=${address}&tag=latest`);
         const bal = rawBal ? parseFloat(rawBal) / Math.pow(10, tkn.decimals) : 0;
+        console.log(`[Chain] ${tkn.symbol}: rawBal=${rawBal ? String(rawBal).slice(0, 20) : 'null'}, bal=${bal.toFixed(4)}, price=${KNOWN_PRICES[tkn.symbol] || 0}`);
         if (bal > 0.001) {
           const price = KNOWN_PRICES[tkn.symbol] || 0;
           erc20Tokens.push({ symbol: tkn.symbol, name: tkn.name, qty: parseFloat(bal.toFixed(6)), price, value: parseFloat((bal * price).toFixed(2)), change: 0 });
         }
-      } catch (e) { /* skip failed token balance fetch */ }
+      } catch (e) { console.warn(`[Chain] Token balance error for ${tkn.symbol}:`, e.message); }
     }
     erc20Tokens.sort((a, b) => b.value - a.value);
 
@@ -159,6 +168,7 @@ const fetchWalletFromChain = async (address) => {
       ...erc20Tokens,
     ];
     const totalUsd = allTokens.reduce((s, t) => s + t.value, 0);
+    console.log(`[Chain] Final: ETH=${ethBalance.toFixed(6)}, erc20Tokens=${erc20Tokens.length}, totalUsd=$${totalUsd.toFixed(2)}, txns=${transactions.length}, txnCount=${txnCount}`);
 
     return {
       ethBalance: parseFloat(ethBalance.toFixed(6)),
@@ -841,8 +851,10 @@ export default function WalletWatcher() {
           const w = updated[i];
           if (w.totalUsd === 0) {
             try {
+              console.log(`[Init] Full fetch for "${w.label}" (${w.address.slice(-8)})...`);
               const fullData = await fetchFullWalletData(w);
-              if (fullData && fullData.totalUsd > 0) {
+              if (fullData) {
+                console.log(`[Init] Full fetch result for "${w.label}": totalUsd=$${fullData.totalUsd}, tokens=${fullData.tokens?.length}, txnCount=${fullData.txnCount}`);
                 updated = updated.map((wl) => wl.id === w.id ? fullData : wl);
               }
             } catch (e) { console.warn("Full fetch for", w.label, "failed:", e.message); }
