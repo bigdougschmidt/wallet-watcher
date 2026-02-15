@@ -59,31 +59,19 @@ const isSupabaseConfigured = () =>
 // ══════════════════════════════════════════════════════════════
 //  ETHERSCAN API — Real blockchain data
 // ══════════════════════════════════════════════════════════════
-const ETHERSCAN_API_KEY = "M6FNGQMSMF9TGRJ1G9E3ENIMJYMZPPCGEC"; // Optional: free key from etherscan.io/myapikey for faster requests
+const ETHERSCAN_API_KEY = "M6FNGQMSMF9TGRJ1G9E3ENIMJYMZPPCGEC";
+const ETHERSCAN_V2_BASE = "https://api.etherscan.io/v2/api"; // V2 (V1 deprecated Aug 2025)
 const etherscanFetch = async (params) => {
   const keyParam = ETHERSCAN_API_KEY ? `&apikey=${ETHERSCAN_API_KEY}` : "";
-  const url = `https://api.etherscan.io/api?${params}${keyParam}`;
+  const url = `${ETHERSCAN_V2_BASE}?chainid=1&${params}${keyParam}`;
   try {
     const res = await fetch(url);
     const data = await res.json();
     if (data.status === "1") return data.result;
-    // For proxy module (eth_getTransactionCount etc.), no status field but result exists
     if (!data.status && data.result) return data.result;
-    // status "0" with array result (e.g. empty token list) is still valid
     if (data.status === "0" && Array.isArray(data.result)) return data.result;
     const action = params.split("&action=")[1]?.split("&")[0];
-    console.warn(`Etherscan NOTOK [${action}]: status=${data.status}, message=${data.message}, result=${typeof data.result === 'string' ? data.result : JSON.stringify(data.result)}`);
-    // If key fails, retry once without key
-    if (ETHERSCAN_API_KEY && data.result && typeof data.result === "string" && (data.result.includes("Invalid API Key") || data.result.includes("apikey") || data.result.includes("Max rate"))) {
-      console.warn("API key issue, retrying without key...");
-      await delay(1000);
-      const res2 = await fetch(`https://api.etherscan.io/api?${params}`);
-      const data2 = await res2.json();
-      if (data2.status === "1") return data2.result;
-      if (!data2.status && data2.result) return data2.result;
-      if (data2.status === "0" && Array.isArray(data2.result)) return data2.result;
-      console.warn(`Etherscan NOTOK (no-key) [${action}]: status=${data2.status}, message=${data2.message}, result=${typeof data2.result === 'string' ? data2.result : JSON.stringify(data2.result)}`);
-    }
+    console.warn(`Etherscan NOTOK [${action}]: message=${data.message}, result=${typeof data.result === 'string' ? data.result : JSON.stringify(data.result)}`);
     return null;
   } catch (e) { console.warn("Etherscan API error:", e.message); return null; }
 };
