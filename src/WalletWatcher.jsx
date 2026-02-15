@@ -108,7 +108,7 @@ const fetchWalletFromChain = async (address) => {
       const valEth = parseFloat(tx.value) / 1e18;
       const feeEth = (parseFloat(tx.gasUsed) * parseFloat(tx.gasPrice)) / 1e18;
       return {
-        hash: tx.hash.slice(0, 10) + "..." + tx.hash.slice(-6),
+        hash: tx.hash,
         method: tx.functionName ? tx.functionName.split("(")[0] : (parseFloat(tx.value) > 0 ? "Transfer" : "Contract Call"),
         block: tx.blockNumber,
         age: ageStr,
@@ -750,7 +750,7 @@ export default function WalletWatcher() {
             const valEth = parseFloat(tx.value) / 1e18;
             const feeEth = (parseFloat(tx.gasUsed) * parseFloat(tx.gasPrice)) / 1e18;
             return {
-              hash: tx.hash.slice(0, 10) + "..." + tx.hash.slice(-6),
+              hash: tx.hash,
               method: tx.functionName ? tx.functionName.split("(")[0] : (parseFloat(tx.value) > 0 ? "Transfer" : "Contract Call"),
               block: tx.blockNumber,
               age: ageStr,
@@ -1247,8 +1247,8 @@ export default function WalletWatcher() {
                 <table style={S.table}>
                   <thead><tr><th style={S.th}>Txn Hash</th><th style={S.th}>Method</th><th style={S.th}>Block</th><th style={S.th}>Age</th><th style={S.th}>From</th><th style={S.th}></th><th style={S.th}>To</th><th style={{ ...S.th, textAlign: "right" }}>Value</th><th style={{ ...S.th, textAlign: "right" }}>Txn Fee</th></tr></thead>
                   <tbody>{w.transactions.map((tx, i) => (
-                    <tr key={i}>
-                      <td style={{ ...S.td, ...S.mono }}><span style={S.link}>{tx.hash}</span></td>
+                    <tr key={i} onClick={() => window.open(`https://etherscan.io/tx/${tx.hash}`, "_blank")} style={{ cursor: "pointer" }} title="View on Etherscan">
+                      <td style={{ ...S.td, ...S.mono }}><span style={{ ...S.link, color: "#1a73e8" }}>{tx.hash.length > 20 ? tx.hash.slice(0, 10) + "..." + tx.hash.slice(-6) : tx.hash}</span></td>
                       <td style={S.td}><span style={S.methodBadge}>{tx.method}</span></td>
                       <td style={S.td}><span style={S.link}>{tx.block}</span></td>
                       <td style={{ ...S.td, color: "#6c757d", whiteSpace: "nowrap" }}>{tx.age}</td>
