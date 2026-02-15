@@ -1186,10 +1186,10 @@ export default function WalletWatcher() {
                     <th style={S.th}>Chain</th><th style={{ ...S.th, textAlign: "right" }}>24h Change</th><th style={{ ...S.th, textAlign: "center" }}>Txns</th>
                   </tr></thead>
                   <tbody>{sortedWallets.map((wl, i) => (
-                    <tr key={wl.id} style={{ cursor: "pointer" }} onMouseEnter={(e) => e.currentTarget.style.background = "#f8f9fa"} onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}>
+                    <tr key={wl.id} style={{ cursor: "pointer" }} onClick={() => { setSelectedWallet(wl); setView("detail"); setEditing(false); }} onMouseEnter={(e) => e.currentTarget.style.background = "#f8f9fa"} onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}>
                       <td style={{ ...S.td, color: "#6c757d", fontSize: 12, width: 30, textAlign: "center" }}>{i + 1}</td>
-                      <td style={S.td} onClick={() => { setSelectedWallet(wl); setView("detail"); setEditing(false); }}><span style={{ fontWeight: 600 }}>{wl.label}</span></td>
-                      <td style={S.td} onClick={() => { setSelectedWallet(wl); setView("detail"); setEditing(false); }}><span style={{ ...S.mono, ...S.link }}>...{wl.address.slice(-7)}</span></td>
+                      <td style={S.td}><span style={{ fontWeight: 600 }}>{wl.label}</span></td>
+                      <td style={S.td}><span style={{ ...S.mono, ...S.link }}>...{wl.address.slice(-7)}</span></td>
                       <td style={{ ...S.td, textAlign: "right", fontWeight: 600 }}>
                         <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
                           {formatUsd(wl.totalUsd)}
