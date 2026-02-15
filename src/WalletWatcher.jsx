@@ -1181,17 +1181,15 @@ export default function WalletWatcher() {
               <div style={{ overflowX: "auto" }}>
                 <table style={S.table}>
                   <thead><tr>
-                    <th style={S.th}></th><th style={S.th}>Nickname</th><th style={S.th}>Address</th><th style={S.th}>Chain</th>
+                    <th style={S.th}></th><th style={S.th}>Nickname</th><th style={S.th}>Address</th>
                     <th style={{ ...S.th, textAlign: "right" }}>Balance (USD)</th><th style={{ ...S.th, textAlign: "right" }}>ETH Balance</th>
-                    <th style={{ ...S.th, textAlign: "right" }}>24h Change</th><th style={{ ...S.th, textAlign: "center" }}>Txns</th>
-                    <th style={{ ...S.th, textAlign: "center" }}>Updated</th>
+                    <th style={S.th}>Chain</th><th style={{ ...S.th, textAlign: "right" }}>24h Change</th><th style={{ ...S.th, textAlign: "center" }}>Txns</th>
                   </tr></thead>
                   <tbody>{sortedWallets.map((wl, i) => (
                     <tr key={wl.id} style={{ cursor: "pointer" }} onMouseEnter={(e) => e.currentTarget.style.background = "#f8f9fa"} onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}>
                       <td style={{ ...S.td, color: "#6c757d", fontSize: 12, width: 30, textAlign: "center" }}>{i + 1}</td>
                       <td style={S.td} onClick={() => { setSelectedWallet(wl); setView("detail"); setEditing(false); }}><span style={{ fontWeight: 600 }}>{wl.label}</span></td>
                       <td style={S.td} onClick={() => { setSelectedWallet(wl); setView("detail"); setEditing(false); }}><span style={{ ...S.mono, ...S.link }}>...{wl.address.slice(-7)}</span></td>
-                      <td style={S.td}><span style={S.badge("info")}>{wl.chain}</span></td>
                       <td style={{ ...S.td, textAlign: "right", fontWeight: 600 }}>
                         <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
                           {formatUsd(wl.totalUsd)}
@@ -1200,9 +1198,9 @@ export default function WalletWatcher() {
                         </span>
                       </td>
                       <td style={{ ...S.td, textAlign: "right", ...S.mono }}>{(wl.ethBalance || 0).toFixed(4)}</td>
+                      <td style={S.td}><span style={S.badge("info")}>{wl.chain}</span></td>
                       <td style={{ ...S.td, textAlign: "right" }}><span style={S.badge((wl.change24h || 0) >= 0 ? "success" : "danger")}>{(wl.change24h || 0) >= 0 ? "+" : ""}{wl.change24h || 0}%</span></td>
                       <td style={{ ...S.td, textAlign: "center" }}>{(wl.txnCount || 0).toLocaleString()}</td>
-                      <td style={{ ...S.td, textAlign: "center", fontSize: 12, color: "#6c757d" }}>{wl.lastUpdated}</td>
                     </tr>
                   ))}</tbody>
                 </table>
