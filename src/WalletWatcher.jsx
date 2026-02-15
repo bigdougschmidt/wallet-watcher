@@ -537,6 +537,11 @@ export default function WalletWatcher() {
       setStorageReady(true);
     };
     loadData();
+    // Load alerts from local storage
+    (async () => {
+      const savedAlerts = await localLoad("alerts");
+      if (savedAlerts && Array.isArray(savedAlerts) && savedAlerts.length > 0) setAlerts(savedAlerts);
+    })();
   }, []);
 
   // ── LOCAL: Auto-save wallets to local storage when in local/offline mode ──
@@ -544,6 +549,13 @@ export default function WalletWatcher() {
     if (!storageReady || dbStatus === "connected") return;
     localSave("wallets", wallets);
   }, [wallets, storageReady, dbStatus]);
+
+  // ── Persist alerts to local storage on every change ──
+  const alertsLoadedRef = useRef(false);
+  useEffect(() => {
+    if (!alertsLoadedRef.current) { alertsLoadedRef.current = true; return; }
+    localSave("alerts", alerts);
+  }, [alerts]);
 
   // ── SUPABASE: Save wallet to database ──
   const saveWalletToDb = useCallback(async (wallet) => {
