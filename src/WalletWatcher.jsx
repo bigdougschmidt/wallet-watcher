@@ -116,43 +116,43 @@ const fetchWalletFromChain = async (address) => {
 
     await delay(API_DELAY);
 
-    // 5) ERC-20 token transfers → derive current holdings
+    // 5) ERC-20 token transfers → discover token contracts, then fetch real balances
     const tokenTxsRaw = await etherscanFetch(`module=account&action=tokentx&address=${address}&page=1&offset=200&sort=desc`);
-    const tokenHoldings = {};
+    const tokenContracts = {};
     if (Array.isArray(tokenTxsRaw)) {
       for (const tx of tokenTxsRaw) {
         const sym = tx.tokenSymbol;
         if (!sym || sym.length > 10) continue; // skip spam tokens with long names
-        const decimals = parseInt(tx.tokenDecimal) || 18;
-        const amt = parseFloat(tx.value) / Math.pow(10, decimals);
-        if (!tokenHoldings[sym]) {
-          tokenHoldings[sym] = { symbol: sym, name: tx.tokenName || sym, qty: 0, price: 0, value: 0, change: 0, contractAddress: tx.contractAddress };
-        }
-        // Track net balance: + for incoming, - for outgoing
-        if (tx.to.toLowerCase() === address.toLowerCase()) {
-          tokenHoldings[sym].qty += amt;
-        } else {
-          tokenHoldings[sym].qty -= amt;
+        if (!tokenContracts[sym]) {
+          tokenContracts[sym] = { symbol: sym, name: tx.tokenName || sym, decimals: parseInt(tx.tokenDecimal) || 18, contractAddress: tx.contractAddress };
         }
       }
     }
 
-    // Filter out tokens with zero or negative balance, and try to get prices for major tokens
+    // Hardcoded prices for major tokens (fallback for tokens without a price feed)
     const KNOWN_PRICES = {
       USDC: 1.0, USDT: 1.0, DAI: 1.0, LINK: 15.5, UNI: 13.5, AAVE: 170, WETH: ethPrice,
       WBTC: 65000, MATIC: 0.58, ARB: 1.1, OP: 3.2, APE: 1.1, SHIB: 0.000025, PEPE: 0.000015,
       LDO: 2.8, RPL: 30, MKR: 3200, SNX: 3.5, CRV: 0.9, COMP: 85, SUSHI: 1.8, BAL: 4.5,
       ENS: 35, GRT: 0.25, FET: 2.3, RNDR: 10, IMX: 2.5, SAND: 0.55, MANA: 0.6, AXS: 9,
+      ALT: 0.03, BLUR: 0.18, DYDX: 1.1, YGG: 0.55, PENDLE: 4.5, SSV: 25,
     };
 
-    const erc20Tokens = Object.values(tokenHoldings)
-      .filter((t) => t.qty > 0.001)
-      .map((t) => {
-        const price = KNOWN_PRICES[t.symbol] || 0;
-        return { symbol: t.symbol, name: t.name, qty: parseFloat(t.qty.toFixed(6)), price, value: parseFloat((t.qty * price).toFixed(2)), change: 0 };
-      })
-      .sort((a, b) => b.value - a.value)
-      .slice(0, 10); // Top 10 tokens by value
+    // Fetch actual on-chain balance for each discovered token (up to 10 tokens)
+    const tokenList = Object.values(tokenContracts).slice(0, 10);
+    const erc20Tokens = [];
+    for (const tkn of tokenList) {
+      await delay(API_DELAY);
+      try {
+        const rawBal = await etherscanFetch(`module=account&action=tokenbalance&contractaddress=${tkn.contractAddress}&address=${address}&tag=latest`);
+        const bal = rawBal ? parseFloat(rawBal) / Math.pow(10, tkn.decimals) : 0;
+        if (bal > 0.001) {
+          const price = KNOWN_PRICES[tkn.symbol] || 0;
+          erc20Tokens.push({ symbol: tkn.symbol, name: tkn.name, qty: parseFloat(bal.toFixed(6)), price, value: parseFloat((bal * price).toFixed(2)), change: 0 });
+        }
+      } catch (e) { /* skip failed token balance fetch */ }
+    }
+    erc20Tokens.sort((a, b) => b.value - a.value);
 
     const allTokens = [
       { symbol: "ETH", name: "Ethereum", qty: parseFloat(ethBalance.toFixed(6)), price: ethPrice, value: parseFloat(ethValue.toFixed(2)), change: 0 },
@@ -784,7 +784,7 @@ export default function WalletWatcher() {
       // Full fetch for wallets still showing $0
       for (let i = 0; i < updated.length; i++) {
         const w = updated[i];
-        if (w.totalUsd === 0 && w.txnCount === 0 && w.tokens.length <= 1) {
+        if (w.totalUsd === 0) {
           try {
             const fullData = await fetchFullWalletData(w);
             if (fullData) updated = updated.map((wl) => wl.id === w.id ? fullData : wl);
@@ -839,7 +839,7 @@ export default function WalletWatcher() {
         // Then do full fetch for any wallet that still has no meaningful data
         for (let i = 0; i < updated.length; i++) {
           const w = updated[i];
-          if (w.totalUsd === 0 && w.txnCount === 0 && w.tokens.length <= 1) {
+          if (w.totalUsd === 0) {
             try {
               const fullData = await fetchFullWalletData(w);
               if (fullData && fullData.totalUsd > 0) {
