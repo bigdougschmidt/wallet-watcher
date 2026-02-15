@@ -1310,8 +1310,15 @@ export default function WalletWatcher() {
           <div style={S.card}>
             <div style={S.cardHeader}><span style={S.cardTitle}>Active Alerts ({alerts.filter((a) => a.active).length} of {alerts.length})</span><button style={S.btnOutline}><PlusIcon /> New Alert</button></div>
             <div style={{ overflowX: "auto" }}>
+              {alerts.length === 0 ? (
+                <div style={{ padding: "32px 24px", textAlign: "center", color: "#6c757d" }}>
+                  <div style={{ fontSize: 28, marginBottom: 8 }}>🔔</div>
+                  <div style={{ fontSize: 14, fontWeight: 500 }}>No alerts configured</div>
+                  <div style={{ fontSize: 13, marginTop: 4 }}>Create a new alert to get notified when wallet balances change.</div>
+                </div>
+              ) : (
               <table style={S.table}>
-                <thead><tr><th style={S.th}>Wallet</th><th style={S.th}>Address</th><th style={S.th}>Condition</th><th style={S.th}>Threshold</th><th style={{ ...S.th, textAlign: "center" }}>Status</th><th style={{ ...S.th, textAlign: "center" }}>Toggle</th></tr></thead>
+                <thead><tr><th style={S.th}>Wallet</th><th style={S.th}>Address</th><th style={S.th}>Condition</th><th style={S.th}>Threshold</th><th style={{ ...S.th, textAlign: "center" }}>Status</th><th style={{ ...S.th, textAlign: "center" }}>Toggle</th><th style={{ ...S.th, textAlign: "center", width: 50 }}></th></tr></thead>
                 <tbody>{alerts.map((a) => (
                   <tr key={a.id}>
                     <td style={{ ...S.td, fontWeight: 600 }}>{a.walletLabel}</td>
@@ -1320,9 +1327,11 @@ export default function WalletWatcher() {
                     <td style={S.td}><span style={S.badge("warning")}>{a.threshold}</span></td>
                     <td style={{ ...S.td, textAlign: "center" }}><span style={S.badge(a.active ? "success" : "default")}>{a.active ? "Active" : "Paused"}</span></td>
                     <td style={{ ...S.td, textAlign: "center" }}><button style={S.toggleOuter(a.active)} onClick={() => setAlerts(alerts.map((x) => x.id === a.id ? { ...x, active: !x.active } : x))}><div style={S.toggleDot(a.active)} /></button></td>
+                    <td style={{ ...S.td, textAlign: "center" }}><button onClick={() => { setAlerts((prev) => prev.filter((x) => x.id !== a.id)); showToast("Alert deleted", "success"); }} style={{ background: "none", border: "1px solid transparent", cursor: "pointer", padding: "4px 6px", borderRadius: 6, display: "inline-flex", alignItems: "center", transition: "all 0.15s" }} onMouseEnter={(e) => { e.currentTarget.style.background = "#fee2e2"; e.currentTarget.style.borderColor = "#fca5a5"; }} onMouseLeave={(e) => { e.currentTarget.style.background = "none"; e.currentTarget.style.borderColor = "transparent"; }} title="Delete alert"><TrashIcon color="#dc3545" size={14} /></button></td>
                   </tr>
                 ))}</tbody>
               </table>
+              )}
             </div>
           </div>
           <div style={S.card}>
