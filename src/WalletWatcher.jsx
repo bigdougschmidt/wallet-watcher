@@ -1245,18 +1245,18 @@ export default function WalletWatcher() {
             {detailTab === "transactions" && (
               <div style={{ overflowX: "auto" }}>
                 <table style={S.table}>
-                  <thead><tr><th style={S.th}>Txn Hash</th><th style={S.th}>Method</th><th style={S.th}>Block</th><th style={S.th}>Age</th><th style={S.th}>From</th><th style={S.th}></th><th style={S.th}>To</th><th style={{ ...S.th, textAlign: "right" }}>Value</th><th style={{ ...S.th, textAlign: "right" }}>Txn Fee</th></tr></thead>
+                  <thead><tr><th style={S.th}>Txn Hash</th><th style={S.th}>Method</th><th style={{ ...S.th, textAlign: "right" }}>Value</th><th style={{ ...S.th, textAlign: "right" }}>Txn Fee</th><th style={S.th}>Block</th><th style={S.th}>Age</th><th style={S.th}>From</th><th style={S.th}></th><th style={S.th}>To</th></tr></thead>
                   <tbody>{w.transactions.map((tx, i) => (
                     <tr key={i} onClick={() => window.open(`https://etherscan.io/tx/${tx.hash}`, "_blank")} style={{ cursor: "pointer" }} title="View on Etherscan">
                       <td style={{ ...S.td, ...S.mono }}><span style={{ ...S.link, color: "#1a73e8" }}>{tx.hash.length > 20 ? tx.hash.slice(0, 10) + "..." + tx.hash.slice(-6) : tx.hash}</span></td>
                       <td style={S.td}><span style={S.methodBadge}>{tx.method}</span></td>
+                      <td style={{ ...S.td, textAlign: "right", whiteSpace: "nowrap" }}>{tx.value}</td>
+                      <td style={{ ...S.td, textAlign: "right", color: "#6c757d", whiteSpace: "nowrap" }}>{tx.fee}</td>
                       <td style={S.td}><span style={S.link}>{tx.block}</span></td>
                       <td style={{ ...S.td, color: "#6c757d", whiteSpace: "nowrap" }}>{tx.age}</td>
                       <td style={{ ...S.td, ...S.mono }}><span style={S.link}>{tx.from}</span></td>
                       <td style={S.td}><span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 22, height: 22, borderRadius: "50%", background: tx.from.includes(w.address.slice(2, 8)) ? "#fee2e2" : "#d1fae5", color: tx.from.includes(w.address.slice(2, 8)) ? "#991b1b" : "#065f46", fontSize: 10, fontWeight: 700 }}>{tx.from.includes(w.address.slice(2, 8)) ? "OUT" : "IN"}</span></td>
                       <td style={{ ...S.td, ...S.mono }}><span style={S.link}>{tx.to}</span></td>
-                      <td style={{ ...S.td, textAlign: "right", whiteSpace: "nowrap" }}>{tx.value}</td>
-                      <td style={{ ...S.td, textAlign: "right", color: "#6c757d", whiteSpace: "nowrap" }}>{tx.fee}</td>
                     </tr>
                   ))}</tbody>
                 </table>
