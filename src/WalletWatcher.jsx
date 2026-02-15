@@ -780,7 +780,17 @@ export default function WalletWatcher() {
     if (refreshing) return;
     setRefreshing(true);
     try {
-      const updated = await refreshWalletData(wallets);
+      let updated = await refreshWalletData(wallets);
+      // Full fetch for wallets still showing $0
+      for (let i = 0; i < updated.length; i++) {
+        const w = updated[i];
+        if (w.totalUsd === 0 && w.txnCount === 0 && w.tokens.length <= 1) {
+          try {
+            const fullData = await fetchFullWalletData(w);
+            if (fullData) updated = updated.map((wl) => wl.id === w.id ? fullData : wl);
+          } catch (e) {}
+        }
+      }
       setWallets(updated);
       recordSnapshot(updated);
       saveAllWalletsToDb(updated);
@@ -819,12 +829,25 @@ export default function WalletWatcher() {
     return () => clearInterval(timer);
   }, [refreshInterval]);
 
-  // Fetch full data on initial load
+  // Fetch full data on initial load — run full chain fetch for wallets with no data
   useEffect(() => {
     if (!storageReady) return;
     const fetchInitial = async () => {
       try {
-        const updated = await refreshWalletData(wallets);
+        // First do quick refresh for all wallets (ETH balance + price)
+        let updated = await refreshWalletData(wallets);
+        // Then do full fetch for any wallet that still has no meaningful data
+        for (let i = 0; i < updated.length; i++) {
+          const w = updated[i];
+          if (w.totalUsd === 0 && w.txnCount === 0 && w.tokens.length <= 1) {
+            try {
+              const fullData = await fetchFullWalletData(w);
+              if (fullData && fullData.totalUsd > 0) {
+                updated = updated.map((wl) => wl.id === w.id ? fullData : wl);
+              }
+            } catch (e) { console.warn("Full fetch for", w.label, "failed:", e.message); }
+          }
+        }
         setWallets(updated);
         saveAllWalletsToDb(updated);
       } catch (e) { console.warn("Initial fetch failed:", e.message); }
