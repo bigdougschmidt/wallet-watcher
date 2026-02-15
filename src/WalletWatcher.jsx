@@ -821,6 +821,17 @@ export default function WalletWatcher() {
   useEffect(() => { saveAllWalletsToDbRef.current = saveAllWalletsToDb; }, [saveAllWalletsToDb]);
   const recordSnapshotRef = useRef(recordSnapshot);
   useEffect(() => { recordSnapshotRef.current = recordSnapshot; }, [recordSnapshot]);
+  const selectedWalletRef = useRef(selectedWallet);
+  useEffect(() => { selectedWalletRef.current = selectedWallet; }, [selectedWallet]);
+
+  // Helper: sync selectedWallet with updated wallet list
+  const syncSelectedWallet = (updated) => {
+    const sel = selectedWalletRef.current;
+    if (sel) {
+      const match = updated.find((w) => w.id === sel.id);
+      if (match) setSelectedWallet(match);
+    }
+  };
 
   // Auto-refresh timer — calls real Etherscan API
   useEffect(() => {
@@ -829,6 +840,7 @@ export default function WalletWatcher() {
         const current = walletsRef.current;
         const updated = await refreshWalletDataRef.current(current);
         setWallets(updated);
+        syncSelectedWallet(updated);
         try { recordSnapshotRef.current(updated); } catch (e) {}
         try { saveAllWalletsToDbRef.current(updated); } catch (e) {}
       } catch (e) { console.warn("Auto-refresh failed:", e.message); }
@@ -837,12 +849,16 @@ export default function WalletWatcher() {
   }, [refreshInterval]);
 
   // Fetch full data on initial load — run full chain fetch for wallets with no data
+  const initialFetchDone = useRef(false);
   useEffect(() => {
-    if (!storageReady) return;
+    if (!storageReady || initialFetchDone.current) return;
+    initialFetchDone.current = true;
     const fetchInitial = async () => {
       try {
-        // First do quick refresh for all wallets (ETH balance + price)
-        let updated = await refreshWalletData(wallets);
+        const current = walletsRef.current;
+        if (current.length === 0) return;
+        // First do quick refresh for all wallets (ETH balance + price + transactions if missing)
+        let updated = await refreshWalletData(current);
         // Then do full fetch for any wallet that still has no meaningful data
         for (let i = 0; i < updated.length; i++) {
           const w = updated[i];
@@ -858,6 +874,7 @@ export default function WalletWatcher() {
           }
         }
         setWallets(updated);
+        syncSelectedWallet(updated);
         saveAllWalletsToDb(updated);
       } catch (e) { console.warn("Initial fetch failed:", e.message); }
     };
