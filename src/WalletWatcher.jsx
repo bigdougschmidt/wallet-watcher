@@ -213,75 +213,6 @@ const fetchQuickRefresh = async (addresses) => {
   }
 };
 
-// ── MOCK DATA ──
-const INITIAL_WALLETS = [
-  {
-    id: 1,
-    address: "0x742d35Cc6634C0532925a3b844Bc9e7595f2bD18",
-    label: "Main Vault",
-    chain: "Ethereum",
-    totalUsd: 284719.43,
-    ethBalance: 82.45,
-    ethValue: 234215.94,
-    change24h: 3.42,
-    txnCount: 1247,
-    tokens: [
-      { symbol: "ETH", name: "Ethereum", qty: 82.45, price: 2841.2, value: 234215.94, change: 4.1 },
-      { symbol: "USDC", name: "USD Coin", qty: 25000, price: 1.0, value: 25000.0, change: 0.01 },
-      { symbol: "LINK", name: "Chainlink", qty: 1250, price: 15.8, value: 19750.0, change: -2.3 },
-      { symbol: "UNI", name: "Uniswap", qty: 420, price: 13.7, value: 5753.49, change: 1.8 },
-    ],
-    transactions: [
-      { hash: "0xc52af6...810d29", method: "Transfer", block: "24400305", age: "2 mins ago", from: "0x742d35...f2bD18", to: "0x4675C7...0a263", value: "1.5 ETH", fee: "0.00042" },
-      { hash: "0x23cc93...b5ecd", method: "Approve", block: "24400198", age: "18 mins ago", from: "0x742d35...f2bD18", to: "0xA0b869...E7e4c8", value: "0 ETH", fee: "0.00031" },
-      { hash: "0xdc39d7...bf776", method: "Swap", block: "24400102", age: "34 mins ago", from: "0x742d35...f2bD18", to: "0x1231DE...F4EaE", value: "0.5 ETH", fee: "0.00089" },
-      { hash: "0x2ddc45...a2a566", method: "Transfer", block: "24399987", age: "1 hr ago", from: "0x8894E0...02B6e8", to: "0x742d35...f2bD18", value: "5.0 ETH", fee: "0.00038" },
-      { hash: "0xf7a812...c3e901", method: "Transfer", block: "24399801", age: "2 hrs ago", from: "0x742d35...f2bD18", to: "0xdead00...00dead", value: "0.1 ETH", fee: "0.00021" },
-    ],
-    lastUpdated: "2 min ago",
-  },
-  {
-    id: 2,
-    address: "0xAb5801a7D398351b8bE11C439e05C5B3259aeC9B",
-    label: "DeFi Yields",
-    chain: "Ethereum",
-    totalUsd: 47832.18,
-    ethBalance: 8.2,
-    ethValue: 23297.84,
-    change24h: -1.27,
-    txnCount: 342,
-    tokens: [
-      { symbol: "ETH", name: "Ethereum", qty: 8.2, price: 2841.2, value: 23297.84, change: 4.1 },
-      { symbol: "AAVE", name: "Aave", qty: 85, price: 168.5, value: 14322.5, change: -3.4 },
-      { symbol: "DAI", name: "Dai", qty: 10211.84, price: 1.0, value: 10211.84, change: 0.0 },
-    ],
-    transactions: [
-      { hash: "0xaa11bb...223344", method: "Deposit", block: "24400280", age: "5 mins ago", from: "0xAb5801...aeC9B", to: "0x7d2768...3f7b5", value: "2.0 ETH", fee: "0.00067" },
-      { hash: "0xbb22cc...445566", method: "Claim", block: "24400100", age: "38 mins ago", from: "0xAb5801...aeC9B", to: "0x4da27a...1b3f8", value: "0 ETH", fee: "0.00045" },
-    ],
-    lastUpdated: "5 min ago",
-  },
-  {
-    id: 3,
-    address: "0x1234567890abcdef1234567890abcdef12345678",
-    label: "NFT Storage",
-    chain: "Ethereum",
-    totalUsd: 12450.0,
-    ethBalance: 4.38,
-    ethValue: 12444.46,
-    change24h: 7.85,
-    txnCount: 89,
-    tokens: [
-      { symbol: "ETH", name: "Ethereum", qty: 4.38, price: 2841.2, value: 12444.46, change: 4.1 },
-      { symbol: "APE", name: "ApeCoin", qty: 5, price: 1.11, value: 5.54, change: 12.5 },
-    ],
-    transactions: [
-      { hash: "0xdd44ee...667788", method: "Transfer", block: "24400290", age: "3 mins ago", from: "0x123456...45678", to: "0xBC4CA0...a3F13", value: "0 ETH", fee: "0.00052" },
-    ],
-    lastUpdated: "1 min ago",
-  },
-];
-
 const CHAINS = ["Ethereum", "Polygon", "BSC", "Arbitrum", "Optimism"];
 const formatUsd = (n) => "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const validateAddress = (addr) => {
@@ -492,7 +423,7 @@ function DeleteModal({ wallet, onConfirm, onCancel }) {
 
 export default function WalletWatcher() {
   const [view, setView] = useState("watchlist");
-  const [wallets, setWallets] = useState(INITIAL_WALLETS);
+  const [wallets, setWallets] = useState([]);
   const [liveEthPrice, setLiveEthPrice] = useState(0);
   const [liveGasGwei, setLiveGasGwei] = useState(0);
 
@@ -568,17 +499,9 @@ export default function WalletWatcher() {
             const dbTokens = await supabase.select("tokens", "order=id.asc");
             const loaded = dbWallets.map((row) => {
               const wTokens = dbTokens.filter((t) => t.wallet_id === row.id);
-              const mockW = INITIAL_WALLETS.find((m) => m.id === row.id);
-              return dbRowToWallet(row, wTokens, mockW?.transactions || []);
+              return dbRowToWallet(row, wTokens, []);
             });
             setWallets(loaded);
-          } else {
-            // First run: seed Supabase with initial data
-            const rows = INITIAL_WALLETS.map(walletToDbRow);
-            await supabase.insert("wallets", rows);
-            for (const w of INITIAL_WALLETS) {
-              if (w.tokens.length > 0) await supabase.insert("tokens", w.tokens.map((t) => tokenToDbRow(t, w.id)));
-            }
           }
           setDbStatus("connected");
           setStorageReady(true);
@@ -704,11 +627,7 @@ export default function WalletWatcher() {
   const [addForm, setAddForm] = useState({ address: "", label: "", chain: "Ethereum" });
   const [addError, setAddError] = useState("");
   const [copied, setCopied] = useState(false);
-  const [alerts, setAlerts] = useState([
-    { id: 1, walletLabel: "Main Vault", address: "0x742d35...f2bD18", type: "Balance drops below", threshold: "$200,000", active: true },
-    { id: 2, walletLabel: "DeFi Yields", address: "0xAb5801...aeC9B", type: "Balance increases by", threshold: "10%", active: false },
-    { id: 3, walletLabel: "Main Vault", address: "0x742d35...f2bD18", type: "Incoming transfer over", threshold: "1 ETH", active: true },
-  ]);
+  const [alerts, setAlerts] = useState([]);
   const [toast, setToast] = useState({ message: "", type: "success", visible: false });
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [editing, setEditing] = useState(false);
@@ -1327,7 +1246,7 @@ export default function WalletWatcher() {
             <div style={{ padding: 20 }}>
               <div style={S.formGroup}>
                 <label style={S.label}>Wallet Address <span style={{ color: "#dc3545" }}>*</span></label>
-                <input style={{ ...S.input, fontFamily: "'Roboto Mono', monospace" }} placeholder="0x742d35Cc6634C0532925a3b844Bc9e7595f2bD18"
+                <input style={{ ...S.input, fontFamily: "'Roboto Mono', monospace" }} placeholder="0x1234...abcd (42 character hex address)"
                   value={addForm.address} onChange={(e) => { setAddForm({ ...addForm, address: e.target.value.trim() }); setAddError(""); }}
                   onFocus={(e) => { e.target.style.borderColor = "#0784c3"; e.target.style.boxShadow = "0 0 0 3px rgba(7,132,195,0.1)"; }}
                   onBlur={(e) => { e.target.style.borderColor = "#d1d5db"; e.target.style.boxShadow = "none"; }} />
