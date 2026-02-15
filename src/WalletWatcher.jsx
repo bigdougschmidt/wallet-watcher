@@ -176,7 +176,7 @@ const fetchWalletFromChain = async (address) => {
       ethValue: parseFloat(ethValue.toFixed(2)),
       ethPrice,
       totalUsd: parseFloat(totalUsd.toFixed(2)),
-      txnCount,
+      txnCount: Math.max(txnCount, transactions.length),
       tokens: allTokens,
       transactions,
       change24h: 0,
@@ -196,13 +196,18 @@ const fetchQuickRefresh = async (addresses) => {
     const priceData = await etherscanFetch(`module=stats&action=ethprice`);
     const ethPrice = priceData?.ethusd ? parseFloat(priceData.ethusd) : 0;
 
+    // Also fetch gas price
+    await delay(API_DELAY);
+    const gasPriceHex = await etherscanFetch(`module=proxy&action=eth_gasPrice`);
+    const gasGwei = gasPriceHex ? parseInt(gasPriceHex, 16) / 1e9 : 0;
+
     const balanceMap = {};
     if (Array.isArray(balances)) {
       for (const b of balances) {
         balanceMap[b.account.toLowerCase()] = parseFloat(b.balance) / 1e18;
       }
     }
-    return { balanceMap, ethPrice };
+    return { balanceMap, ethPrice, gasGwei };
   } catch (err) {
     console.error("fetchQuickRefresh error:", err);
     return null;
@@ -490,6 +495,7 @@ export default function WalletWatcher() {
   const [view, setView] = useState("watchlist");
   const [wallets, setWallets] = useState(INITIAL_WALLETS);
   const [liveEthPrice, setLiveEthPrice] = useState(0);
+  const [liveGasGwei, setLiveGasGwei] = useState(0);
 
   // Derive live ETH price from wallet data
   useEffect(() => {
@@ -498,6 +504,19 @@ export default function WalletWatcher() {
       if (eth && eth.price > 0) { setLiveEthPrice(eth.price); return; }
     }
   }, [wallets]);
+
+  // Fetch gas price on mount and every 60 seconds
+  useEffect(() => {
+    const fetchGas = async () => {
+      try {
+        const gasPriceHex = await etherscanFetch(`module=proxy&action=eth_gasPrice`);
+        if (gasPriceHex) setLiveGasGwei(parseFloat((parseInt(gasPriceHex, 16) / 1e9).toFixed(1)));
+      } catch (e) { /* ignore */ }
+    };
+    fetchGas();
+    const id = setInterval(fetchGas, 60000);
+    return () => clearInterval(id);
+  }, []);
   const [storageReady, setStorageReady] = useState(false);
   const [dbStatus, setDbStatus] = useState("loading"); // "loading" | "connected" | "local" | "offline"
   const prevBalancesRef = useRef({});
@@ -1009,7 +1028,7 @@ export default function WalletWatcher() {
         <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
           <span><EthIcon /> ETH Price: <span style={{ color: "#fff", fontWeight: 500 }}>{liveEthPrice > 0 ? formatUsd(liveEthPrice) : "Loading..."}</span></span>
           <span style={{ color: "#ffffff44" }}>|</span>
-          <span>Gas: <span style={{ color: "#fff", fontWeight: 500 }}>—</span></span>
+          <span>Gas: <span style={{ color: "#fff", fontWeight: 500 }}>{liveGasGwei > 0 ? `${liveGasGwei} Gwei` : "—"}</span></span>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <span style={{ ...S.badge("default"), background: "rgba(255,255,255,0.12)", color: "#ffffffcc", fontSize: 11 }}>Ethereum Mainnet</span>
@@ -1236,7 +1255,7 @@ export default function WalletWatcher() {
             <div style={S.cardHeader}><span style={S.cardTitle}>Overview</span></div>
             <div>
               <div style={S.overviewRow}><div style={S.overviewLabel}>ETH Balance:</div><div style={S.overviewValue}><EthIcon /> <strong>{w.ethBalance.toFixed(4)} ETH</strong></div></div>
-              <div style={S.overviewRow}><div style={S.overviewLabel}>ETH Value:</div><div style={S.overviewValue}>{formatUsd(w.ethValue)} <span style={S.muted}>(@ $2,841.20/ETH)</span></div></div>
+              <div style={S.overviewRow}><div style={S.overviewLabel}>ETH Value:</div><div style={S.overviewValue}>{formatUsd(w.ethBalance * liveEthPrice)} <span style={S.muted}>(@ {formatUsd(liveEthPrice)}/ETH)</span></div></div>
               <div style={S.overviewRow}><div style={S.overviewLabel}>Total Value:</div><div style={S.overviewValue}><strong>{formatUsd(w.totalUsd)}</strong> <span style={S.badge(w.change24h >= 0 ? "success" : "danger")}>{w.change24h >= 0 ? "+" : ""}{w.change24h}% (24h)</span></div></div>
               <div style={{ ...S.overviewRow, borderBottom: "none" }}><div style={S.overviewLabel}>Transaction Count:</div><div style={S.overviewValue}>{w.txnCount.toLocaleString()} txns</div></div>
             </div>
