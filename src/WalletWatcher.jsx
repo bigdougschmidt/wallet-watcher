@@ -1353,7 +1353,12 @@ export default function WalletWatcher() {
                       const w = wallets.find((wl) => String(wl.id) === String(newAlertForm.walletId));
                       if (!w) { showToast("Please select a wallet", "error"); return; }
                       if (!newAlertForm.threshold.trim()) { showToast("Please enter a threshold", "error"); return; }
-                      const newAlert = { id: Date.now(), walletLabel: w.label, address: w.address, type: newAlertForm.type, threshold: newAlertForm.threshold.trim(), active: true };
+                      const rawThreshold = newAlertForm.threshold.trim();
+                      // Format as USD if it looks like a dollar amount (digits, optional $ and commas)
+                      const stripped = rawThreshold.replace(/[$,]/g, "");
+                      const asNum = parseFloat(stripped);
+                      const fmtThreshold = (!isNaN(asNum) && /^[\$\s,]*[\d,.]+$/.test(rawThreshold)) ? "$" + Math.round(asNum).toLocaleString("en-US") : rawThreshold;
+                      const newAlert = { id: Date.now(), walletLabel: w.label, address: w.address, type: newAlertForm.type, threshold: fmtThreshold, active: true };
                       setAlerts((prev) => [...prev, newAlert]);
                       setShowNewAlert(false);
                       setNewAlertForm({ walletId: "", type: "Balance drops below", threshold: "" });
