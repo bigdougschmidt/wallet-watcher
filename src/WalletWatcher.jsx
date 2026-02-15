@@ -1071,7 +1071,7 @@ export default function WalletWatcher() {
       {/* ── NAV BAR ── */}
       <div style={S.navBar}><div style={S.navInner}>
         <div style={S.logo} onClick={() => { setView("watchlist"); setSelectedWallet(null); }}>
-          <img src={APP_LOGO} alt="Wallet Watcher" style={{ width: 32, height: 32 }} /><span style={S.logoLabel}>Wallet Watcher</span>
+          <img src={APP_LOGO} alt="Wallet Watcher" style={{ width: 36, height: 36, borderRadius: 4 }} /><span style={S.logoLabel}>Wallet Watcher</span>
         </div>
         <div style={S.navLinks}>
           <button style={S.navLink(view === "watchlist" || view === "detail")} onClick={() => setView("watchlist")}>Watchlist</button>
