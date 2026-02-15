@@ -195,18 +195,13 @@ const fetchQuickRefresh = async (addresses) => {
     const priceData = await etherscanFetch(`module=stats&action=ethprice`);
     const ethPrice = priceData?.ethusd ? parseFloat(priceData.ethusd) : 0;
 
-    // Also fetch gas price via gastracker (more reliable than proxy in V2)
-    await delay(API_DELAY);
-    const gasData = await etherscanFetch(`module=gastracker&action=gasoracle`);
-    const gasGwei = gasData?.ProposeGasPrice ? parseFloat(gasData.ProposeGasPrice) : 0;
-
     const balanceMap = {};
     if (Array.isArray(balances)) {
       for (const b of balances) {
         balanceMap[b.account.toLowerCase()] = parseFloat(b.balance) / 1e18;
       }
     }
-    return { balanceMap, ethPrice, gasGwei };
+    return { balanceMap, ethPrice };
   } catch (err) {
     console.error("fetchQuickRefresh error:", err);
     return null;
@@ -425,7 +420,7 @@ export default function WalletWatcher() {
   const [view, setView] = useState("watchlist");
   const [wallets, setWallets] = useState([]);
   const [liveEthPrice, setLiveEthPrice] = useState(0);
-  const [liveGasGwei, setLiveGasGwei] = useState(0);
+  const [tickerPrices, setTickerPrices] = useState({});
 
   // Derive live ETH price from wallet data
   useEffect(() => {
@@ -435,16 +430,26 @@ export default function WalletWatcher() {
     }
   }, [wallets]);
 
-  // Fetch gas price on mount and every 60 seconds
+  // Fetch crypto ticker prices on mount and every 60 seconds
   useEffect(() => {
-    const fetchGas = async () => {
+    const TICKER_COINS = "bitcoin,ethereum,solana,ripple,dogecoin,matic-network,uniswap,shiba-inu";
+    const TICKER_MAP = { bitcoin: "BTC", ethereum: "ETH", solana: "SOL", ripple: "XRP", dogecoin: "DOGE", "matic-network": "MATIC", uniswap: "UNI", "shiba-inu": "SHIB" };
+    const fetchTicker = async () => {
       try {
-        const gasData = await etherscanFetch(`module=gastracker&action=gasoracle`);
-        if (gasData?.ProposeGasPrice) setLiveGasGwei(parseFloat(parseFloat(gasData.ProposeGasPrice).toFixed(1)));
+        const res = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${TICKER_COINS}&vs_currencies=usd&include_24hr_change=true`);
+        if (!res.ok) return;
+        const data = await res.json();
+        const prices = {};
+        for (const [id, info] of Object.entries(data)) {
+          const sym = TICKER_MAP[id];
+          if (sym) prices[sym] = { price: info.usd, change: info.usd_24h_change || 0 };
+        }
+        setTickerPrices(prices);
+        if (prices.ETH?.price) setLiveEthPrice(prices.ETH.price);
       } catch (e) { /* ignore */ }
     };
-    fetchGas();
-    const id = setInterval(fetchGas, 60000);
+    fetchTicker();
+    const id = setInterval(fetchTicker, 60000);
     return () => clearInterval(id);
   }, []);
   const [storageReady, setStorageReady] = useState(false);
@@ -938,8 +943,8 @@ export default function WalletWatcher() {
 
   const S = {
     page: { fontFamily: "'Roboto', 'Helvetica Neue', Arial, sans-serif", background: "#f8f9fa", minHeight: "100vh", color: "#1e2022", fontSize: 14, lineHeight: 1.5 },
-    topBar: { background: "#21325b", color: "#ffffffcc", fontSize: 12, padding: "6px 0", borderBottom: "1px solid #1a2847" },
-    topBarInner: { maxWidth: 940, margin: "0 auto", padding: "0 16px", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 },
+    topBar: { background: "#21325b", color: "#ffffffcc", fontSize: 12, padding: "6px 0", borderBottom: "1px solid #1a2847", overflow: "hidden" },
+    topBarInner: { maxWidth: 940, margin: "0 auto", padding: "0 16px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 },
     navBar: { background: "#fff", borderBottom: "1px solid #e9ecef", position: "sticky", top: 0, zIndex: 100 },
     navInner: { maxWidth: 940, margin: "0 auto", padding: "0 16px", display: "flex", alignItems: "center", justifyContent: "space-between", height: 56 },
     logo: { display: "flex", alignItems: "center", gap: 8, cursor: "pointer" },
@@ -1018,13 +1023,30 @@ export default function WalletWatcher() {
       <DeleteModal wallet={deleteTarget} onConfirm={confirmDelete} onCancel={cancelDelete} />
 
       {/* ── TOP BAR ── */}
+      <style>{`@keyframes tickerScroll { 0% { transform: translateX(0); } 100% { transform: translateX(-50%); } }`}</style>
       <div style={S.topBar}><div style={S.topBarInner}>
-        <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
-          <span><EthIcon /> ETH Price: <span style={{ color: "#fff", fontWeight: 500 }}>{liveEthPrice > 0 ? formatUsd(liveEthPrice) : "Loading..."}</span></span>
-          <span style={{ color: "#ffffff44" }}>|</span>
-          <span>Gas: <span style={{ color: "#fff", fontWeight: 500 }}>{liveGasGwei > 0 ? `${liveGasGwei} Gwei` : "—"}</span></span>
+        <div style={{ flex: 1, overflow: "hidden", maskImage: "linear-gradient(to right, transparent, black 40px, black calc(100% - 40px), transparent)", WebkitMaskImage: "linear-gradient(to right, transparent, black 40px, black calc(100% - 40px), transparent)" }}>
+          <div style={{ display: "flex", gap: 24, whiteSpace: "nowrap", animation: Object.keys(tickerPrices).length > 0 ? "tickerScroll 30s linear infinite" : "none", width: "max-content" }}>
+            {[1, 2].map((dup) => (
+              <div key={dup} style={{ display: "flex", gap: 24, alignItems: "center" }}>
+                {["BTC", "ETH", "SOL", "XRP", "DOGE", "MATIC", "UNI", "SHIB"].map((sym) => {
+                  const t = tickerPrices[sym];
+                  if (!t) return <span key={sym} style={{ color: "#ffffff55" }}>{sym} —</span>;
+                  const up = t.change >= 0;
+                  const fmtPrice = t.price >= 1 ? "$" + t.price.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "$" + t.price.toFixed(6);
+                  return (
+                    <span key={sym} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                      <span style={{ color: "#ffffffcc", fontWeight: 600 }}>{sym}</span>
+                      <span style={{ color: "#fff", fontWeight: 500 }}>{fmtPrice}</span>
+                      <span style={{ color: up ? "#34d399" : "#f87171", fontWeight: 500, fontSize: 11 }}>{up ? "▲" : "▼"} {Math.abs(t.change).toFixed(1)}%</span>
+                    </span>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
         </div>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0, marginLeft: 12 }}>
           <span style={{ ...S.badge("default"), background: "rgba(255,255,255,0.12)", color: "#ffffffcc", fontSize: 11 }}>Ethereum Mainnet</span>
           <span style={{
             ...S.badge("default"), fontSize: 10, display: "inline-flex", alignItems: "center", gap: 4,
