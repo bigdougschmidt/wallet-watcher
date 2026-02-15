@@ -698,10 +698,14 @@ export default function WalletWatcher() {
     if (wallets.some((wl) => wl.id !== selectedWallet.id && wl.address.toLowerCase() === normalized.toLowerCase())) {
       showToast("Address already on watchlist", "error"); return;
     }
+    const trimmedEditLabel = editForm.label.trim() || normalized.slice(0, 8) + "...";
+    if (wallets.some((wl) => wl.id !== selectedWallet.id && wl.label.toLowerCase() === trimmedEditLabel.toLowerCase())) {
+      showToast("A wallet with this nickname already exists", "error"); return;
+    }
     const updated = {
       ...selectedWallet,
       address: normalized,
-      label: editForm.label.trim() || normalized.slice(0, 8) + "...",
+      label: trimmedEditLabel,
     };
     setWallets((prev) => {
       const updatedList = prev.map((wl) => wl.id === updated.id ? updated : wl);
@@ -840,8 +844,10 @@ export default function WalletWatcher() {
     if (!validateAddress(addForm.address)) { setAddError("Invalid address format. Must be 0x followed by 40 hex characters (42 total), or 40 hex characters."); return; }
     const normalized = normalizeAddress(addForm.address);
     if (wallets.find((w) => w.address.toLowerCase() === normalized.toLowerCase())) { setAddError("This wallet is already on your watchlist."); return; }
+    const trimmedLabel = addForm.label.trim() || "Untitled Wallet";
+    if (wallets.find((w) => w.label.toLowerCase() === trimmedLabel.toLowerCase())) { setAddError("A wallet with this nickname already exists. Please choose a different name."); return; }
     const newWallet = {
-      id: Date.now(), address: normalized, label: addForm.label.trim() || "Untitled Wallet",
+      id: Date.now(), address: normalized, label: trimmedLabel,
       chain: addForm.chain, totalUsd: 0, ethBalance: 0, ethValue: 0, change24h: 0, txnCount: 0,
       tokens: [], transactions: [], lastUpdated: "Loading...",
     };
