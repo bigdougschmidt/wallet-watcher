@@ -209,7 +209,7 @@ const fetchQuickRefresh = async (addresses) => {
 };
 
 const CHAINS = ["Ethereum", "Polygon", "BSC", "Arbitrum", "Optimism"];
-const formatUsd = (n) => "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const formatUsd = (n) => "$" + (n || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const validateAddress = (addr) => {
   const a = addr.trim();
   return /^0x[a-fA-F0-9]{40}$/i.test(a) || /^[a-fA-F0-9]{40}$/.test(a);
@@ -388,7 +388,7 @@ function DeleteModal({ wallet, onConfirm, onCancel }) {
               </div>
               <div>
                 <div style={{ fontSize: 11, color: "#6c757d", textTransform: "uppercase", letterSpacing: "0.04em" }}>ETH</div>
-                <div style={{ fontSize: 14, fontWeight: 600, color: "#1e2022" }}>{wallet.ethBalance.toFixed(4)}</div>
+                <div style={{ fontSize: 14, fontWeight: 600, color: "#1e2022" }}>{(wallet.ethBalance || 0).toFixed(4)}</div>
               </div>
               <div>
                 <div style={{ fontSize: 11, color: "#6c757d", textTransform: "uppercase", letterSpacing: "0.04em" }}>Chain</div>
@@ -459,13 +459,13 @@ export default function WalletWatcher() {
 
   // ── SUPABASE: Convert DB row to app wallet object ──
   const dbRowToWallet = (row, tokens = [], transactions = []) => ({
-    id: row.id, address: row.address, label: row.label, chain: row.chain,
-    totalUsd: parseFloat(row.total_usd), ethBalance: parseFloat(row.eth_balance),
-    ethValue: parseFloat(row.eth_value), change24h: parseFloat(row.change_24h),
-    txnCount: row.txn_count,
+    id: row.id, address: row.address, label: row.label, chain: row.chain || "Ethereum",
+    totalUsd: parseFloat(row.total_usd) || 0, ethBalance: parseFloat(row.eth_balance) || 0,
+    ethValue: parseFloat(row.eth_value) || 0, change24h: parseFloat(row.change_24h) || 0,
+    txnCount: row.txn_count || 0,
     tokens: tokens.map((t) => ({
-      symbol: t.symbol, name: t.name, qty: parseFloat(t.qty),
-      price: parseFloat(t.price), value: parseFloat(t.value), change: parseFloat(t.change),
+      symbol: t.symbol, name: t.name, qty: parseFloat(t.qty) || 0,
+      price: parseFloat(t.price) || 0, value: parseFloat(t.value) || 0, change: parseFloat(t.change) || 0,
     })),
     transactions, lastUpdated: row.last_updated || "Never",
   });
@@ -711,8 +711,8 @@ export default function WalletWatcher() {
     setTimeout(() => setToast((t) => ({ ...t, visible: false })), 2800);
   }, []);
 
-  const totalPortfolio = wallets.reduce((s, w) => s + w.totalUsd, 0);
-  const totalEth = wallets.reduce((s, w) => s + w.ethBalance, 0);
+  const totalPortfolio = wallets.reduce((s, w) => s + (w.totalUsd || 0), 0);
+  const totalEth = wallets.reduce((s, w) => s + (w.ethBalance || 0), 0);
 
   const sortedWallets = sortOrder === "default" ? wallets :
     [...wallets].sort((a, b) => sortOrder === "desc" ? b.totalUsd - a.totalUsd : a.totalUsd - b.totalUsd);
@@ -1031,14 +1031,14 @@ export default function WalletWatcher() {
               <div key={dup} style={{ display: "flex", gap: 24, alignItems: "center" }}>
                 {["BTC", "ETH", "SOL", "XRP", "DOGE", "MATIC", "UNI", "SHIB"].map((sym) => {
                   const t = tickerPrices[sym];
-                  if (!t) return <span key={sym} style={{ color: "#ffffff55" }}>{sym} —</span>;
-                  const up = t.change >= 0;
-                  const fmtPrice = t.price >= 1 ? "$" + t.price.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "$" + t.price.toFixed(6);
+                  if (!t || t.price == null) return <span key={sym} style={{ color: "#ffffff55" }}>{sym} —</span>;
+                  const up = (t.change || 0) >= 0;
+                  const fmtPrice = (t.price || 0) >= 1 ? "$" + (t.price || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "$" + (t.price || 0).toFixed(6);
                   return (
                     <span key={sym} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                       <span style={{ color: "#ffffffcc", fontWeight: 600 }}>{sym}</span>
                       <span style={{ color: "#fff", fontWeight: 500 }}>{fmtPrice}</span>
-                      <span style={{ color: up ? "#34d399" : "#f87171", fontWeight: 500, fontSize: 11 }}>{up ? "▲" : "▼"} {Math.abs(t.change).toFixed(1)}%</span>
+                      <span style={{ color: up ? "#34d399" : "#f87171", fontWeight: 500, fontSize: 11 }}>{up ? "▲" : "▼"} {Math.abs(t.change || 0).toFixed(1)}%</span>
                     </span>
                   );
                 })}
@@ -1190,9 +1190,9 @@ export default function WalletWatcher() {
                           {balanceDir[wl.id] === "down" && <span style={{ color: "#991b1b", fontSize: "inherit", lineHeight: 1 }}>▼</span>}
                         </span>
                       </td>
-                      <td style={{ ...S.td, textAlign: "right", ...S.mono }}>{wl.ethBalance.toFixed(4)}</td>
-                      <td style={{ ...S.td, textAlign: "right" }}><span style={S.badge(wl.change24h >= 0 ? "success" : "danger")}>{wl.change24h >= 0 ? "+" : ""}{wl.change24h}%</span></td>
-                      <td style={{ ...S.td, textAlign: "center" }}>{wl.txnCount.toLocaleString()}</td>
+                      <td style={{ ...S.td, textAlign: "right", ...S.mono }}>{(wl.ethBalance || 0).toFixed(4)}</td>
+                      <td style={{ ...S.td, textAlign: "right" }}><span style={S.badge((wl.change24h || 0) >= 0 ? "success" : "danger")}>{(wl.change24h || 0) >= 0 ? "+" : ""}{wl.change24h || 0}%</span></td>
+                      <td style={{ ...S.td, textAlign: "center" }}>{(wl.txnCount || 0).toLocaleString()}</td>
                       <td style={{ ...S.td, textAlign: "center", fontSize: 12, color: "#6c757d" }}>{wl.lastUpdated}</td>
                     </tr>
                   ))}</tbody>
@@ -1270,10 +1270,10 @@ export default function WalletWatcher() {
           <div style={{ ...S.card, marginBottom: 16 }}>
             <div style={S.cardHeader}><span style={S.cardTitle}>Overview</span></div>
             <div>
-              <div style={S.overviewRow}><div style={S.overviewLabel}>ETH Balance:</div><div style={S.overviewValue}><EthIcon /> <strong>{w.ethBalance.toFixed(4)} ETH</strong></div></div>
+              <div style={S.overviewRow}><div style={S.overviewLabel}>ETH Balance:</div><div style={S.overviewValue}><EthIcon /> <strong>{(w.ethBalance || 0).toFixed(4)} ETH</strong></div></div>
               <div style={S.overviewRow}><div style={S.overviewLabel}>ETH Value:</div><div style={S.overviewValue}>{formatUsd(w.ethBalance * liveEthPrice)} <span style={S.muted}>(@ {formatUsd(liveEthPrice)}/ETH)</span></div></div>
               <div style={S.overviewRow}><div style={S.overviewLabel}>Total Value:</div><div style={S.overviewValue}><strong>{formatUsd(w.totalUsd)}</strong> <span style={S.badge(w.change24h >= 0 ? "success" : "danger")}>{w.change24h >= 0 ? "+" : ""}{w.change24h}% (24h)</span></div></div>
-              <div style={{ ...S.overviewRow, borderBottom: "none" }}><div style={S.overviewLabel}>Transaction Count:</div><div style={S.overviewValue}>{w.txnCount.toLocaleString()} txns</div></div>
+              <div style={{ ...S.overviewRow, borderBottom: "none" }}><div style={S.overviewLabel}>Transaction Count:</div><div style={S.overviewValue}>{(w.txnCount || 0).toLocaleString()} txns</div></div>
             </div>
           </div>
           <div style={S.card}>
@@ -1313,7 +1313,7 @@ export default function WalletWatcher() {
                         <div style={{ width: 28, height: 28, borderRadius: "50%", background: "#f1f3f5", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 11 }}>{t.symbol.slice(0, 2)}</div>
                         <div><div style={{ fontWeight: 600, fontSize: 13.5 }}>{t.name}</div><div style={{ fontSize: 12, color: "#6c757d" }}>{t.symbol}</div></div>
                       </div></td>
-                      <td style={{ ...S.td, textAlign: "right", ...S.mono }}>{t.qty.toLocaleString()}</td>
+                      <td style={{ ...S.td, textAlign: "right", ...S.mono }}>{(t.qty || 0).toLocaleString()}</td>
                       <td style={{ ...S.td, textAlign: "right" }}>{formatUsd(t.price)}</td>
                       <td style={{ ...S.td, textAlign: "right", fontWeight: 600 }}>{formatUsd(t.value)}</td>
                       <td style={{ ...S.td, textAlign: "right" }}><span style={S.badge(t.change >= 0 ? "success" : "danger")}>{t.change >= 0 ? "+" : ""}{t.change}%</span></td>
