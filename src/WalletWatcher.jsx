@@ -489,6 +489,13 @@ export default function WalletWatcher() {
   };
 
   // ── DUAL-MODE: Try Supabase, fall back to local storage ──
+  // Known demo wallet addresses to purge from DB (legacy from initial development)
+  const DEMO_ADDRESSES = new Set([
+    "0x742d35cc6634c0532925a3b844bc9e7595f2bd18",
+    "0xab5801a7d398351b8be11c439e05c5b3259aec9b",
+    "0x1234567890abcdef1234567890abcdef12345678",
+  ]);
+
   useEffect(() => {
     const loadData = async () => {
       // 1) Try Supabase first
@@ -496,12 +503,22 @@ export default function WalletWatcher() {
         try {
           const dbWallets = await supabase.select("wallets", "order=created_at.asc");
           if (dbWallets.length > 0) {
-            const dbTokens = await supabase.select("tokens", "order=id.asc");
-            const loaded = dbWallets.map((row) => {
-              const wTokens = dbTokens.filter((t) => t.wallet_id === row.id);
-              return dbRowToWallet(row, wTokens, []);
-            });
-            setWallets(loaded);
+            // Purge any legacy demo wallets from DB
+            const demoWallets = dbWallets.filter((r) => DEMO_ADDRESSES.has(r.address.toLowerCase()));
+            for (const dw of demoWallets) {
+              try { await supabase.delete("tokens", { wallet_id: dw.id }); } catch (e) {}
+              try { await supabase.delete("wallets", { id: dw.id }); } catch (e) {}
+            }
+            // Load only real wallets
+            const realWallets = dbWallets.filter((r) => !DEMO_ADDRESSES.has(r.address.toLowerCase()));
+            if (realWallets.length > 0) {
+              const dbTokens = await supabase.select("tokens", "order=id.asc");
+              const loaded = realWallets.map((row) => {
+                const wTokens = dbTokens.filter((t) => t.wallet_id === row.id);
+                return dbRowToWallet(row, wTokens, []);
+              });
+              setWallets(loaded);
+            }
           }
           setDbStatus("connected");
           setStorageReady(true);
