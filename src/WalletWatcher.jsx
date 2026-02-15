@@ -476,15 +476,14 @@ export default function WalletWatcher() {
     qty: t.qty, price: t.price, value: t.value, change: t.change,
   });
 
-  // ── LOCAL STORAGE helpers (fallback for artifact sandbox) ──
+  // ── LOCAL STORAGE helpers ──
   const localSave = async (key, data) => {
-    try { if (window.storage) await window.storage.set(key, JSON.stringify(data)); } catch (e) {}
+    try { localStorage.setItem(`ww_${key}`, JSON.stringify(data)); } catch (e) {}
   };
   const localLoad = async (key) => {
     try {
-      if (!window.storage) return null;
-      const r = await window.storage.get(key);
-      return r && r.value ? JSON.parse(r.value) : null;
+      const raw = localStorage.getItem(`ww_${key}`);
+      return raw ? JSON.parse(raw) : null;
     } catch (e) { return null; }
   };
 
@@ -528,12 +527,12 @@ export default function WalletWatcher() {
         }
       }
 
-      // 2) Fall back to window.storage (artifact persistent storage)
+      // 2) Fall back to localStorage
       const localWallets = await localLoad("wallets");
       if (localWallets && Array.isArray(localWallets) && localWallets.length > 0) {
         setWallets(localWallets);
       }
-      setDbStatus(window.storage ? "local" : "offline");
+      setDbStatus(typeof localStorage !== "undefined" ? "local" : "offline");
       setStorageReady(true);
     };
     loadData();
