@@ -536,10 +536,19 @@ export default function WalletWatcher() {
       setStorageReady(true);
     };
     loadData();
-    // Load alerts from local storage
+    // Load alerts from Supabase
     (async () => {
-      const savedAlerts = await localLoad("alerts");
-      if (savedAlerts && Array.isArray(savedAlerts) && savedAlerts.length > 0) setAlerts(savedAlerts);
+      if (isSupabaseConfigured()) {
+        try {
+          const dbAlerts = await supabase.select("alerts", "order=created_at.asc");
+          if (dbAlerts.length > 0) {
+            setAlerts(dbAlerts.map((a) => ({
+              id: a.id, walletLabel: a.wallet_label, address: a.address,
+              type: a.type, threshold: a.threshold, active: a.active,
+            })));
+          }
+        } catch (e) { console.warn("Failed to load alerts:", e.message); }
+      }
     })();
   }, []);
 
@@ -548,13 +557,6 @@ export default function WalletWatcher() {
     if (!storageReady || dbStatus === "connected") return;
     localSave("wallets", wallets);
   }, [wallets, storageReady, dbStatus]);
-
-  // ── Persist alerts to local storage on every change ──
-  const alertsLoadedRef = useRef(false);
-  useEffect(() => {
-    if (!alertsLoadedRef.current) { alertsLoadedRef.current = true; return; }
-    localSave("alerts", alerts);
-  }, [alerts]);
 
   // ── SUPABASE: Save wallet to database ──
   const saveWalletToDb = useCallback(async (wallet) => {
@@ -1347,7 +1349,7 @@ export default function WalletWatcher() {
                     <input style={S.input} placeholder={newAlertForm.type.includes("increases") ? "e.g. 10%" : newAlertForm.type.includes("Gas") ? "e.g. 5 Gwei" : "e.g. $10,000 or 1 ETH"} value={newAlertForm.threshold} onChange={(e) => setNewAlertForm({ ...newAlertForm, threshold: e.target.value })} />
                   </div>
                   <div style={{ display: "flex", gap: 8 }}>
-                    <button style={{ ...S.btnPrimary, padding: "8px 16px", fontSize: 13 }} onClick={() => {
+                    <button style={{ ...S.btnPrimary, padding: "8px 16px", fontSize: 13 }} onClick={async () => {
                       const w = wallets.find((wl) => String(wl.id) === String(newAlertForm.walletId));
                       if (!w) { showToast("Please select a wallet", "error"); return; }
                       if (!newAlertForm.threshold.trim()) { showToast("Please enter a threshold", "error"); return; }
@@ -1355,6 +1357,9 @@ export default function WalletWatcher() {
                       setAlerts((prev) => [...prev, newAlert]);
                       setShowNewAlert(false);
                       setNewAlertForm({ walletId: "", type: "Balance drops below", threshold: "" });
+                      if (isSupabaseConfigured()) {
+                        try { await supabase.insert("alerts", [{ id: newAlert.id, wallet_label: newAlert.walletLabel, address: newAlert.address, type: newAlert.type, threshold: newAlert.threshold, active: true }]); } catch (e) { console.warn("Failed to save alert:", e.message); }
+                      }
                       showToast("Alert created", "success");
                     }}>Create</button>
                     <button style={{ ...S.btnOutline, padding: "8px 16px", fontSize: 13 }} onClick={() => setShowNewAlert(false)}>Cancel</button>
@@ -1379,8 +1384,8 @@ export default function WalletWatcher() {
                     <td style={S.td}>{a.type}</td>
                     <td style={S.td}><span style={S.badge("warning")}>{a.threshold}</span></td>
                     <td style={{ ...S.td, textAlign: "center" }}><span style={S.badge(a.active ? "success" : "default")}>{a.active ? "Active" : "Paused"}</span></td>
-                    <td style={{ ...S.td, textAlign: "center" }}><button style={S.toggleOuter(a.active)} onClick={() => setAlerts(alerts.map((x) => x.id === a.id ? { ...x, active: !x.active } : x))}><div style={S.toggleDot(a.active)} /></button></td>
-                    <td style={{ ...S.td, textAlign: "center" }}><button onClick={() => { setAlerts((prev) => prev.filter((x) => x.id !== a.id)); showToast("Alert deleted", "success"); }} style={{ background: "none", border: "1px solid transparent", cursor: "pointer", padding: "4px 6px", borderRadius: 6, display: "inline-flex", alignItems: "center", transition: "all 0.15s" }} onMouseEnter={(e) => { e.currentTarget.style.background = "#fee2e2"; e.currentTarget.style.borderColor = "#fca5a5"; }} onMouseLeave={(e) => { e.currentTarget.style.background = "none"; e.currentTarget.style.borderColor = "transparent"; }} title="Delete alert"><TrashIcon color="#dc3545" size={14} /></button></td>
+                    <td style={{ ...S.td, textAlign: "center" }}><button style={S.toggleOuter(a.active)} onClick={async () => { setAlerts(alerts.map((x) => x.id === a.id ? { ...x, active: !x.active } : x)); if (isSupabaseConfigured()) { try { await supabase.update("alerts", { id: a.id }, { active: !a.active }); } catch (e) {} } }}><div style={S.toggleDot(a.active)} /></button></td>
+                    <td style={{ ...S.td, textAlign: "center" }}><button onClick={async () => { setAlerts((prev) => prev.filter((x) => x.id !== a.id)); if (isSupabaseConfigured()) { try { await supabase.delete("alerts", { id: a.id }); } catch (e) {} } showToast("Alert deleted", "success"); }} style={{ background: "none", border: "1px solid transparent", cursor: "pointer", padding: "4px 6px", borderRadius: 6, display: "inline-flex", alignItems: "center", transition: "all 0.15s" }} onMouseEnter={(e) => { e.currentTarget.style.background = "#fee2e2"; e.currentTarget.style.borderColor = "#fca5a5"; }} onMouseLeave={(e) => { e.currentTarget.style.background = "none"; e.currentTarget.style.borderColor = "transparent"; }} title="Delete alert"><TrashIcon color="#dc3545" size={14} /></button></td>
                   </tr>
                 ))}</tbody>
               </table>
