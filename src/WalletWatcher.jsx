@@ -725,7 +725,8 @@ export default function WalletWatcher() {
     const result = await fetchQuickRefresh(addresses);
     if (!result) return walletList; // API failed, keep existing data
     const { balanceMap, ethPrice } = result;
-    return walletList.map((w) => {
+    const updated = [];
+    for (const w of walletList) {
       const newEthBalance = balanceMap[w.address.toLowerCase()] ?? w.ethBalance;
       const newEthValue = newEthBalance * ethPrice;
       // Update ETH token in tokens array
@@ -737,16 +738,42 @@ export default function WalletWatcher() {
       const newTotalUsd = updatedTokens.reduce((s, t) => s + t.value, 0);
       const prevTotal = w.totalUsd || 0;
       const newChange24h = prevTotal > 0 ? parseFloat((((newTotalUsd - prevTotal) / prevTotal) * 100).toFixed(2)) : 0;
-      return {
+      // Fetch transactions if missing
+      let txns = w.transactions;
+      if (!txns || txns.length === 0) {
+        try {
+          await delay(API_DELAY);
+          const txListRaw = await etherscanFetch(`module=account&action=txlist&address=${w.address}&page=1&offset=5&sort=desc`);
+          txns = Array.isArray(txListRaw) ? txListRaw.map((tx) => {
+            const age = Math.floor((Date.now() / 1000 - parseInt(tx.timeStamp)) / 60);
+            const ageStr = age < 60 ? `${age} min ago` : age < 1440 ? `${Math.floor(age / 60)} hr ago` : `${Math.floor(age / 1440)} d ago`;
+            const valEth = parseFloat(tx.value) / 1e18;
+            const feeEth = (parseFloat(tx.gasUsed) * parseFloat(tx.gasPrice)) / 1e18;
+            return {
+              hash: tx.hash.slice(0, 10) + "..." + tx.hash.slice(-6),
+              method: tx.functionName ? tx.functionName.split("(")[0] : (parseFloat(tx.value) > 0 ? "Transfer" : "Contract Call"),
+              block: tx.blockNumber,
+              age: ageStr,
+              from: tx.from.slice(0, 10) + "..." + tx.from.slice(-5),
+              to: tx.to ? tx.to.slice(0, 10) + "..." + tx.to.slice(-5) : "Contract Create",
+              value: valEth > 0 ? valEth.toFixed(4) + " ETH" : "0 ETH",
+              fee: feeEth.toFixed(5),
+            };
+          }) : [];
+        } catch (e) { console.warn("Tx fetch error:", e.message); }
+      }
+      updated.push({
         ...w,
         ethBalance: parseFloat(newEthBalance.toFixed(6)),
         ethValue: parseFloat(newEthValue.toFixed(2)),
         tokens: updatedTokens,
         totalUsd: parseFloat(newTotalUsd.toFixed(2)),
         change24h: newChange24h,
+        transactions: txns,
         lastUpdated: "Just now",
-      };
-    });
+      });
+    }
+    return updated;
   }, []);
 
   // Full fetch for a single wallet (balance + txns + tokens) — used on add
