@@ -645,6 +645,8 @@ export default function WalletWatcher() {
   const [addError, setAddError] = useState("");
   const [copied, setCopied] = useState(false);
   const [alerts, setAlerts] = useState([]);
+  const [showNewAlert, setShowNewAlert] = useState(false);
+  const [newAlertForm, setNewAlertForm] = useState({ walletId: "", type: "Balance drops below", threshold: "" });
   const [toast, setToast] = useState({ message: "", type: "success", visible: false });
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [editing, setEditing] = useState(false);
@@ -1308,7 +1310,47 @@ export default function WalletWatcher() {
         </div>
         <div style={S.content}>
           <div style={S.card}>
-            <div style={S.cardHeader}><span style={S.cardTitle}>Active Alerts ({alerts.filter((a) => a.active).length} of {alerts.length})</span><button style={S.btnOutline}><PlusIcon /> New Alert</button></div>
+            <div style={S.cardHeader}><span style={S.cardTitle}>Active Alerts ({alerts.filter((a) => a.active).length} of {alerts.length})</span><button style={S.btnOutline} onClick={() => { setShowNewAlert(!showNewAlert); setNewAlertForm({ walletId: "", type: "Balance drops below", threshold: "" }); }}><PlusIcon /> New Alert</button></div>
+            {showNewAlert && (
+              <div style={{ padding: "16px 20px", borderBottom: "1px solid #e9ecef", background: "#f8f9fa" }}>
+                <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>Create New Alert</div>
+                <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
+                  <div style={{ flex: "1 1 180px" }}>
+                    <div style={{ fontSize: 12, fontWeight: 500, color: "#6c757d", marginBottom: 4 }}>Wallet</div>
+                    <select style={{ ...S.input, cursor: "pointer" }} value={newAlertForm.walletId} onChange={(e) => setNewAlertForm({ ...newAlertForm, walletId: e.target.value })}>
+                      <option value="">Select a wallet...</option>
+                      {wallets.map((w) => <option key={w.id} value={w.id}>{w.label} (...{w.address.slice(-7)})</option>)}
+                    </select>
+                  </div>
+                  <div style={{ flex: "1 1 180px" }}>
+                    <div style={{ fontSize: 12, fontWeight: 500, color: "#6c757d", marginBottom: 4 }}>Condition</div>
+                    <select style={{ ...S.input, cursor: "pointer" }} value={newAlertForm.type} onChange={(e) => setNewAlertForm({ ...newAlertForm, type: e.target.value })}>
+                      <option>Balance drops below</option>
+                      <option>Balance increases by</option>
+                      <option>Incoming transfer over</option>
+                      <option>Gas price drops below</option>
+                    </select>
+                  </div>
+                  <div style={{ flex: "1 1 120px" }}>
+                    <div style={{ fontSize: 12, fontWeight: 500, color: "#6c757d", marginBottom: 4 }}>Threshold</div>
+                    <input style={S.input} placeholder={newAlertForm.type.includes("increases") ? "e.g. 10%" : newAlertForm.type.includes("Gas") ? "e.g. 5 Gwei" : "e.g. $10,000 or 1 ETH"} value={newAlertForm.threshold} onChange={(e) => setNewAlertForm({ ...newAlertForm, threshold: e.target.value })} />
+                  </div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button style={{ ...S.btnPrimary, padding: "8px 16px", fontSize: 13 }} onClick={() => {
+                      const w = wallets.find((wl) => String(wl.id) === String(newAlertForm.walletId));
+                      if (!w) { showToast("Please select a wallet", "error"); return; }
+                      if (!newAlertForm.threshold.trim()) { showToast("Please enter a threshold", "error"); return; }
+                      const newAlert = { id: Date.now(), walletLabel: w.label, address: w.address, type: newAlertForm.type, threshold: newAlertForm.threshold.trim(), active: true };
+                      setAlerts((prev) => [...prev, newAlert]);
+                      setShowNewAlert(false);
+                      setNewAlertForm({ walletId: "", type: "Balance drops below", threshold: "" });
+                      showToast("Alert created", "success");
+                    }}>Create</button>
+                    <button style={{ ...S.btnOutline, padding: "8px 16px", fontSize: 13 }} onClick={() => setShowNewAlert(false)}>Cancel</button>
+                  </div>
+                </div>
+              </div>
+            )}
             <div style={{ overflowX: "auto" }}>
               {alerts.length === 0 ? (
                 <div style={{ padding: "32px 24px", textAlign: "center", color: "#6c757d" }}>
