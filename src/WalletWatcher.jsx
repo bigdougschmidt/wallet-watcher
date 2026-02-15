@@ -67,8 +67,6 @@ const etherscanFetch = async (params) => {
   try {
     const res = await fetch(url);
     const data = await res.json();
-    const action = params.split("&action=")[1]?.split("&")[0];
-    console.log(`[API] ${action}: status=${data.status}, hasResult=${!!data.result}, resultType=${typeof data.result}, jsonrpc=${data.jsonrpc || 'none'}`);
     if (data.status === "1") return data.result;
     if (!data.status && data.result) return data.result;
     if (data.status === "0" && Array.isArray(data.result)) return data.result;
@@ -96,9 +94,8 @@ const fetchWalletFromChain = async (address) => {
 
     await delay(API_DELAY);
 
-    // 3) Transaction count (try proxy first, fall back to txlist length)
+    // 3) Transaction count
     const txCountRaw = await etherscanFetch(`module=proxy&action=eth_getTransactionCount&address=${address}&tag=latest`);
-    console.log(`[Chain] txCount raw for ${address.slice(-8)}:`, JSON.stringify(txCountRaw), typeof txCountRaw);
     const txnCount = txCountRaw ? (typeof txCountRaw === 'string' && txCountRaw.startsWith('0x') ? parseInt(txCountRaw, 16) : parseInt(txCountRaw) || 0) : 0;
 
     await delay(API_DELAY);
@@ -512,9 +509,8 @@ export default function WalletWatcher() {
     const fetchGas = async () => {
       try {
         const gasData = await etherscanFetch(`module=gastracker&action=gasoracle`);
-        console.log("[Gas] gasoracle response:", JSON.stringify(gasData));
         if (gasData?.ProposeGasPrice) setLiveGasGwei(parseFloat(parseFloat(gasData.ProposeGasPrice).toFixed(1)));
-      } catch (e) { console.warn("[Gas] fetch error:", e.message); }
+      } catch (e) { /* ignore */ }
     };
     fetchGas();
     const id = setInterval(fetchGas, 60000);
