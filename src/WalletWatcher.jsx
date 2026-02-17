@@ -124,7 +124,7 @@ const fetchWalletFromChain = async (address) => {
     await delay(API_DELAY);
 
     // 5) ERC-20 token transfers → discover token contracts, then fetch real balances
-    const tokenTxsRaw = await etherscanFetch(`module=account&action=tokentx&address=${address}&page=1&offset=200&sort=desc`);
+    const tokenTxsRaw = await etherscanFetch(`module=account&action=tokentx&address=${address}&page=1&offset=500&sort=desc`);
     console.log(`[Chain] Token transfers for ${address.slice(-8)}: type=${typeof tokenTxsRaw}, isArray=${Array.isArray(tokenTxsRaw)}, length=${Array.isArray(tokenTxsRaw) ? tokenTxsRaw.length : 'N/A'}`);
     const tokenContracts = {};
     if (Array.isArray(tokenTxsRaw)) {
@@ -138,31 +138,46 @@ const fetchWalletFromChain = async (address) => {
     }
     console.log(`[Chain] Discovered ${Object.keys(tokenContracts).length} unique tokens:`, Object.keys(tokenContracts).join(", "));
 
-    // Hardcoded prices for major tokens (fallback for tokens without a price feed)
-    const KNOWN_PRICES = {
-      USDC: 1.0, USDT: 1.0, DAI: 1.0, LINK: 15.5, UNI: 13.5, AAVE: 170, WETH: ethPrice,
-      WBTC: 65000, MATIC: 0.58, ARB: 1.1, OP: 3.2, APE: 1.1, SHIB: 0.000025, PEPE: 0.000015,
-      LDO: 2.8, RPL: 30, MKR: 3200, SNX: 3.5, CRV: 0.9, COMP: 85, SUSHI: 1.8, BAL: 4.5,
-      ENS: 35, GRT: 0.25, FET: 2.3, RNDR: 10, IMX: 2.5, SAND: 0.55, MANA: 0.6, AXS: 9,
-      ALT: 0.03, BLUR: 0.18, DYDX: 1.1, YGG: 0.55, PENDLE: 4.5, SSV: 25,
-    };
-
-    // Fetch actual on-chain balance for each discovered token (up to 10 tokens)
-    const tokenList = Object.values(tokenContracts).slice(0, 10);
+    // Fetch actual on-chain balance for each discovered token (up to 50 tokens)
+    const tokenList = Object.values(tokenContracts).slice(0, 50);
     console.log(`[Chain] Fetching balances for ${tokenList.length} tokens...`);
-    const erc20Tokens = [];
+    const tokensWithBalance = [];
     for (const tkn of tokenList) {
       await delay(API_DELAY);
       try {
         const rawBal = await etherscanFetch(`module=account&action=tokenbalance&contractaddress=${tkn.contractAddress}&address=${address}&tag=latest`);
         const bal = rawBal ? parseFloat(rawBal) / Math.pow(10, tkn.decimals) : 0;
-        console.log(`[Chain] ${tkn.symbol}: rawBal=${rawBal ? String(rawBal).slice(0, 20) : 'null'}, bal=${bal.toFixed(4)}, price=${KNOWN_PRICES[tkn.symbol] || 0}`);
         if (bal > 0.001) {
-          const price = KNOWN_PRICES[tkn.symbol] || 0;
-          erc20Tokens.push({ symbol: tkn.symbol, name: tkn.name, qty: parseFloat(bal.toFixed(6)), price, value: parseFloat((bal * price).toFixed(2)), change: 0 });
+          tokensWithBalance.push({ ...tkn, balance: bal });
         }
       } catch (e) { console.warn(`[Chain] Token balance error for ${tkn.symbol}:`, e.message); }
     }
+
+    // Batch-fetch live prices from CoinGecko by contract address
+    const KNOWN_PRICES_FALLBACK = {
+      USDC: 1.0, USDT: 1.0, DAI: 1.0, WETH: ethPrice, WBTC: 65000,
+    };
+    const contractPrices = {};
+    if (tokensWithBalance.length > 0) {
+      try {
+        const contractAddrs = tokensWithBalance.map((t) => t.contractAddress.toLowerCase()).join(",");
+        const cgRes = await fetch(`https://api.coingecko.com/api/v3/simple/token_price/ethereum?contract_addresses=${contractAddrs}&vs_currencies=usd`);
+        if (cgRes.ok) {
+          const cgData = await cgRes.json();
+          for (const [addr, priceObj] of Object.entries(cgData)) {
+            if (priceObj?.usd) contractPrices[addr.toLowerCase()] = priceObj.usd;
+          }
+          console.log(`[Chain] CoinGecko returned prices for ${Object.keys(contractPrices).length}/${tokensWithBalance.length} tokens`);
+        }
+      } catch (e) { console.warn("[Chain] CoinGecko token price fetch error:", e.message); }
+    }
+
+    const erc20Tokens = tokensWithBalance.map((tkn) => {
+      const price = contractPrices[tkn.contractAddress.toLowerCase()] || KNOWN_PRICES_FALLBACK[tkn.symbol] || 0;
+      const value = parseFloat((tkn.balance * price).toFixed(2));
+      console.log(`[Chain] ${tkn.symbol}: bal=${tkn.balance.toFixed(4)}, price=$${price}, value=$${value}`);
+      return { symbol: tkn.symbol, name: tkn.name, qty: parseFloat(tkn.balance.toFixed(6)), price, value, change: 0 };
+    });
     erc20Tokens.sort((a, b) => b.value - a.value);
 
     const allTokens = [
