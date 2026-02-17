@@ -80,9 +80,76 @@ const etherscanFetch = async (params, chainId = 1) => {
 const delay = (ms) => new Promise((r) => setTimeout(r, ms));
 const API_DELAY = ETHERSCAN_API_KEY ? 250 : 5500; // Rate limit: 5/s with key, 1/5s without
 
+// Fetch the Multichain Portfolio total directly from Etherscan's address page via CORS proxy
+const fetchEtherscanMultichainTotal = async (address) => {
+  const CORS_PROXIES = [
+    (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+    (url) => `https://corsproxy.io/?${encodeURIComponent(url)}`,
+  ];
+  const targetUrl = `https://etherscan.io/address/${address}`;
+
+  for (const makeProxy of CORS_PROXIES) {
+    try {
+      const proxyUrl = makeProxy(targetUrl);
+      const res = await fetch(proxyUrl, { signal: AbortSignal.timeout(15000) });
+      if (!res.ok) continue;
+      const html = await res.text();
+
+      // Parse the per-chain breakdown: "Etherscan ($256,352,915)" "BaseScan ($25,544)" etc.
+      const chainPattern = /(?:Etherscan|BaseScan|BscScan|SnowScan|Polygonscan|Optimism|Arbiscan|LineaScan|BlastScan|ScrollScan|FraxScan|SonicScan|BeraChain|GnosisScan|CeloScan|MantleScan|ZkSyncScan)\s*\(\$([0-9,]+(?:\.[0-9]+)?)\)/gi;
+      let match;
+      let chainTotals = [];
+      let grandTotal = 0;
+      while ((match = chainPattern.exec(html)) !== null) {
+        const val = parseFloat(match[1].replace(/,/g, ''));
+        if (!isNaN(val)) {
+          chainTotals.push(val);
+          grandTotal += val;
+        }
+      }
+
+      // Also try to find "Multichain Portfolio" total directly if present
+      // Pattern: "$235,726,147.71 (Multichain Portfolio)" or similar
+      const mcpPattern = /\$([0-9,]+(?:\.[0-9]+)?)\s*\(Multichain\s*Portfolio\)/i;
+      const mcpMatch = html.match(mcpPattern);
+      if (mcpMatch) {
+        const mcpVal = parseFloat(mcpMatch[1].replace(/,/g, ''));
+        if (!isNaN(mcpVal) && mcpVal > 0) {
+          console.log(`[Multichain] Found Multichain Portfolio total: $${mcpVal.toLocaleString()}`);
+          return mcpVal;
+        }
+      }
+
+      if (grandTotal > 0) {
+        console.log(`[Multichain] Scraped ${chainTotals.length} chains, total: $${grandTotal.toLocaleString()}`);
+        return grandTotal;
+      }
+
+      // Fallback: try to find "$X across N Chains" pattern
+      const acrossPattern = /\$([0-9,]+(?:\.[0-9]+)?)\s+across\s+\d+\s+Chains/i;
+      const acrossMatch = html.match(acrossPattern);
+      if (acrossMatch) {
+        const acrossVal = parseFloat(acrossMatch[1].replace(/,/g, ''));
+        if (!isNaN(acrossVal) && acrossVal > 0) {
+          console.log(`[Multichain] Found "across chains" total: $${acrossVal.toLocaleString()}`);
+          return acrossVal;
+        }
+      }
+
+      console.log(`[Multichain] Page fetched but no multichain data found in HTML`);
+    } catch (e) {
+      console.warn(`[Multichain] CORS proxy error:`, e.message);
+    }
+  }
+  return null; // Fallback: couldn't scrape
+};
+
 // Fetch real wallet data from Etherscan
 const fetchWalletFromChain = async (address) => {
   try {
+    // Start scraping the Etherscan multichain portfolio total in parallel
+    const multichainTotalPromise = fetchEtherscanMultichainTotal(address);
+
     // 1) ETH balance (in wei)
     const balanceWei = await etherscanFetch(`module=account&action=balance&address=${address}&tag=latest`);
     const ethBalance = balanceWei ? parseFloat(balanceWei) / 1e18 : 0;
@@ -266,8 +333,15 @@ const fetchWalletFromChain = async (address) => {
       ...erc20Tokens,
       ...multichainTokens,
     ];
-    const totalUsd = allTokens.reduce((s, t) => s + t.value, 0);
-    console.log(`[Chain] Final: ETH=${ethBalance.toFixed(6)}, erc20=${erc20Tokens.length}, multichain=${multichainTokens.length}, totalUsd=$${totalUsd.toFixed(2)}`);
+    const calculatedTotal = allTokens.reduce((s, t) => s + t.value, 0);
+
+    // Use scraped Etherscan multichain total if available (more accurate)
+    const scrapedMultichainTotal = await multichainTotalPromise;
+    const totalUsd = scrapedMultichainTotal && scrapedMultichainTotal > calculatedTotal * 0.5
+      ? scrapedMultichainTotal
+      : calculatedTotal;
+    const totalSource = scrapedMultichainTotal && scrapedMultichainTotal > calculatedTotal * 0.5 ? "etherscan" : "calculated";
+    console.log(`[Chain] Final: ETH=${ethBalance.toFixed(6)}, erc20=${erc20Tokens.length}, multichain=${multichainTokens.length}, calc=$${calculatedTotal.toFixed(2)}, scraped=$${scrapedMultichainTotal || 'N/A'}, using=${totalSource}, totalUsd=$${totalUsd.toFixed(2)}`);
 
     return {
       ethBalance: parseFloat(ethBalance.toFixed(6)),
