@@ -123,61 +123,59 @@ const fetchWalletFromChain = async (address) => {
 
     await delay(API_DELAY);
 
-    // 5) ERC-20 token transfers → discover token contracts, then fetch real balances
-    const tokenTxsRaw = await etherscanFetch(`module=account&action=tokentx&address=${address}&page=1&offset=500&sort=desc`);
-    console.log(`[Chain] Token transfers for ${address.slice(-8)}: type=${typeof tokenTxsRaw}, isArray=${Array.isArray(tokenTxsRaw)}, length=${Array.isArray(tokenTxsRaw) ? tokenTxsRaw.length : 'N/A'}`);
-    const tokenContracts = {};
-    if (Array.isArray(tokenTxsRaw)) {
-      for (const tx of tokenTxsRaw) {
-        const sym = tx.tokenSymbol;
-        if (!sym || sym.length > 10) continue; // skip spam tokens with long names
-        if (!tokenContracts[sym]) {
-          tokenContracts[sym] = { symbol: sym, name: tx.tokenName || sym, decimals: parseInt(tx.tokenDecimal) || 18, contractAddress: tx.contractAddress };
+    // 5) Get ALL token balances in one call via Etherscan V2 addresstokenbalance
+    const tokenBalancesRaw = await etherscanFetch(`module=account&action=addresstokenbalance&address=${address}&page=1&offset=400`);
+    console.log(`[Chain] addresstokenbalance for ${address.slice(-8)}: type=${typeof tokenBalancesRaw}, isArray=${Array.isArray(tokenBalancesRaw)}, count=${Array.isArray(tokenBalancesRaw) ? tokenBalancesRaw.length : 'N/A'}`);
+
+    // Parse token balances
+    const tokensWithBalance = [];
+    if (Array.isArray(tokenBalancesRaw)) {
+      for (const t of tokenBalancesRaw) {
+        const sym = t.TokenSymbol || '';
+        if (!sym || sym.length > 12) continue; // skip spam
+        const divisor = parseInt(t.TokenDivisor) || 18;
+        const qty = parseFloat(t.TokenQuantity) / Math.pow(10, divisor);
+        if (qty > 0.0001) {
+          tokensWithBalance.push({
+            symbol: sym, name: t.TokenName || sym, contractAddress: t.TokenAddress,
+            balance: qty, decimals: divisor
+          });
         }
       }
     }
-    console.log(`[Chain] Discovered ${Object.keys(tokenContracts).length} unique tokens:`, Object.keys(tokenContracts).join(", "));
+    console.log(`[Chain] Tokens with balance: ${tokensWithBalance.length}`);
 
-    // Fetch actual on-chain balance for each discovered token (up to 50 tokens)
-    const tokenList = Object.values(tokenContracts).slice(0, 50);
-    console.log(`[Chain] Fetching balances for ${tokenList.length} tokens...`);
-    const tokensWithBalance = [];
-    for (const tkn of tokenList) {
-      await delay(API_DELAY);
-      try {
-        const rawBal = await etherscanFetch(`module=account&action=tokenbalance&contractaddress=${tkn.contractAddress}&address=${address}&tag=latest`);
-        const bal = rawBal ? parseFloat(rawBal) / Math.pow(10, tkn.decimals) : 0;
-        if (bal > 0.001) {
-          tokensWithBalance.push({ ...tkn, balance: bal });
-        }
-      } catch (e) { console.warn(`[Chain] Token balance error for ${tkn.symbol}:`, e.message); }
-    }
-
-    // Batch-fetch live prices from CoinGecko by contract address
+    // Batch-fetch live prices from CoinGecko by contract address (up to 100 at a time)
     const KNOWN_PRICES_FALLBACK = {
-      USDC: 1.0, USDT: 1.0, DAI: 1.0, WETH: ethPrice, WBTC: 65000,
+      USDC: 1.0, USDT: 1.0, DAI: 1.0, WETH: ethPrice, WBTC: 65000, BUSD: 1.0, TUSD: 1.0, USDD: 1.0, FRAX: 1.0, LUSD: 1.0,
     };
     const contractPrices = {};
     if (tokensWithBalance.length > 0) {
-      try {
-        const contractAddrs = tokensWithBalance.map((t) => t.contractAddress.toLowerCase()).join(",");
-        const cgRes = await fetch(`https://api.coingecko.com/api/v3/simple/token_price/ethereum?contract_addresses=${contractAddrs}&vs_currencies=usd`);
-        if (cgRes.ok) {
-          const cgData = await cgRes.json();
-          for (const [addr, priceObj] of Object.entries(cgData)) {
-            if (priceObj?.usd) contractPrices[addr.toLowerCase()] = priceObj.usd;
+      // CoinGecko allows up to ~100 contract addresses per call
+      const batchSize = 100;
+      for (let i = 0; i < tokensWithBalance.length; i += batchSize) {
+        const batch = tokensWithBalance.slice(i, i + batchSize);
+        try {
+          const contractAddrs = batch.map((t) => t.contractAddress.toLowerCase()).join(",");
+          const cgRes = await fetch(`https://api.coingecko.com/api/v3/simple/token_price/ethereum?contract_addresses=${contractAddrs}&vs_currencies=usd`);
+          if (cgRes.ok) {
+            const cgData = await cgRes.json();
+            for (const [addr, priceObj] of Object.entries(cgData)) {
+              if (priceObj?.usd) contractPrices[addr.toLowerCase()] = priceObj.usd;
+            }
           }
-          console.log(`[Chain] CoinGecko returned prices for ${Object.keys(contractPrices).length}/${tokensWithBalance.length} tokens`);
-        }
-      } catch (e) { console.warn("[Chain] CoinGecko token price fetch error:", e.message); }
+          if (i + batchSize < tokensWithBalance.length) await delay(1500); // CoinGecko rate limit
+        } catch (e) { console.warn("[Chain] CoinGecko token price batch error:", e.message); }
+      }
+      console.log(`[Chain] CoinGecko returned prices for ${Object.keys(contractPrices).length}/${tokensWithBalance.length} tokens`);
     }
 
     const erc20Tokens = tokensWithBalance.map((tkn) => {
       const price = contractPrices[tkn.contractAddress.toLowerCase()] || KNOWN_PRICES_FALLBACK[tkn.symbol] || 0;
       const value = parseFloat((tkn.balance * price).toFixed(2));
-      console.log(`[Chain] ${tkn.symbol}: bal=${tkn.balance.toFixed(4)}, price=$${price}, value=$${value}`);
+      if (value > 0.01) console.log(`[Chain] ${tkn.symbol}: bal=${tkn.balance.toFixed(4)}, price=$${price}, value=$${value}`);
       return { symbol: tkn.symbol, name: tkn.name, qty: parseFloat(tkn.balance.toFixed(6)), price, value, change: 0 };
-    });
+    }).filter(t => t.value > 0.01); // Only show tokens with meaningful value
     erc20Tokens.sort((a, b) => b.value - a.value);
 
     // 6) Multichain: fetch native balances on L2s and alt-L1s
