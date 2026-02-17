@@ -185,6 +185,9 @@ const fetchWalletFromChain = async (address) => {
       { id: 10, name: "Optimism", native: "ETH", useEthPrice: true },
       { id: 137, name: "Polygon", native: "MATIC", useEthPrice: false, cgId: "matic-network" },
       { id: 56, name: "BSC", native: "BNB", useEthPrice: false, cgId: "binancecoin" },
+      { id: 43114, name: "Avalanche", native: "AVAX", useEthPrice: false, cgId: "avalanche-2" },
+      { id: 59144, name: "Linea", native: "ETH", useEthPrice: true },
+      { id: 81457, name: "Blast", native: "ETH", useEthPrice: true },
     ];
 
     // Fetch alt-L1 native prices from CoinGecko
@@ -212,31 +215,27 @@ const fetchWalletFromChain = async (address) => {
       } catch (e) { console.warn(`[Multichain] ${chain.name} balance error:`, e.message); }
     }
 
-    // Fetch ERC-20 token holdings on major L2 chains (Arbitrum, Base, Optimism)
-    const L2_TOKEN_CHAINS = L2_CHAINS.filter((c) => c.useEthPrice); // ETH-native L2s
-    for (const chain of L2_TOKEN_CHAINS) {
+    // Fetch ALL token holdings on L2 chains via addresstokenbalance (one call per chain)
+    const CHAIN_CG_PLATFORM = { 1: "ethereum", 42161: "arbitrum-one", 8453: "base", 10: "optimistic-ethereum", 137: "polygon-pos", 56: "binance-smart-chain", 43114: "avalanche", 59144: "linea", 81457: "blast" };
+    for (const chain of L2_CHAINS) {
       await delay(API_DELAY);
       try {
-        const l2TokenTxs = await etherscanFetch(`module=account&action=tokentx&address=${address}&page=1&offset=200&sort=desc`, chain.id);
-        if (!Array.isArray(l2TokenTxs) || l2TokenTxs.length === 0) continue;
-        const l2Contracts = {};
-        for (const tx of l2TokenTxs) {
-          const sym = tx.tokenSymbol;
-          if (!sym || sym.length > 10) continue;
-          if (!l2Contracts[sym]) l2Contracts[sym] = { symbol: sym, name: tx.tokenName || sym, decimals: parseInt(tx.tokenDecimal) || 18, contractAddress: tx.contractAddress };
+        const l2TokensRaw = await etherscanFetch(`module=account&action=addresstokenbalance&address=${address}&page=1&offset=200`, chain.id);
+        if (!Array.isArray(l2TokensRaw) || l2TokensRaw.length === 0) {
+          console.log(`[Multichain] ${chain.name}: no tokens found`);
+          continue;
         }
-        const l2TokenList = Object.values(l2Contracts).slice(0, 20);
         const l2WithBalance = [];
-        for (const tkn of l2TokenList) {
-          await delay(API_DELAY);
-          try {
-            const rawBal = await etherscanFetch(`module=account&action=tokenbalance&contractaddress=${tkn.contractAddress}&address=${address}&tag=latest`, chain.id);
-            const bal = rawBal ? parseFloat(rawBal) / Math.pow(10, tkn.decimals) : 0;
-            if (bal > 0.001) l2WithBalance.push({ ...tkn, balance: bal });
-          } catch (e) { /* skip */ }
+        for (const t of l2TokensRaw) {
+          const sym = t.TokenSymbol || '';
+          if (!sym || sym.length > 12) continue;
+          const divisor = parseInt(t.TokenDivisor) || 18;
+          const qty = parseFloat(t.TokenQuantity) / Math.pow(10, divisor);
+          if (qty > 0.0001) {
+            l2WithBalance.push({ symbol: sym, name: t.TokenName || sym, contractAddress: t.TokenAddress, balance: qty });
+          }
         }
-        // Price L2 tokens via CoinGecko (platform = chain-specific)
-        const CHAIN_CG_PLATFORM = { 42161: "arbitrum-one", 8453: "base", 10: "optimistic-ethereum" };
+        // Price L2 tokens via CoinGecko
         const platform = CHAIN_CG_PLATFORM[chain.id];
         if (l2WithBalance.length > 0 && platform) {
           try {
@@ -254,9 +253,10 @@ const fetchWalletFromChain = async (address) => {
                 }
               }
             }
+            await delay(1500); // CoinGecko rate limit
           } catch (e) { console.warn(`[Multichain] ${chain.name} CoinGecko error:`, e.message); }
         }
-        console.log(`[Multichain] ${chain.name}: discovered ${Object.keys(l2Contracts).length} tokens, ${l2WithBalance.length} with balance`);
+        console.log(`[Multichain] ${chain.name}: ${l2WithBalance.length} tokens with balance`);
       } catch (e) { console.warn(`[Multichain] ${chain.name} token discovery error:`, e.message); }
     }
     console.log(`[Multichain] Total from other chains: $${multichainTotal.toFixed(2)} across ${multichainTokens.length} assets`);
