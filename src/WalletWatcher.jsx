@@ -63,16 +63,16 @@ const APP_LOGO = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5v
 // ══════════════════════════════════════════════════════════════
 const ETHERSCAN_API_KEY = "M6FNGQMSMF9TGRJ1G9E3ENIMJYMZPPCGEC";
 const ETHERSCAN_V2_BASE = "https://api.etherscan.io/v2/api"; // V2 (V1 deprecated Aug 2025)
-const etherscanFetch = async (params) => {
+const etherscanFetch = async (params, chainId = 1) => {
   const keyParam = ETHERSCAN_API_KEY ? `&apikey=${ETHERSCAN_API_KEY}` : "";
-  const url = `${ETHERSCAN_V2_BASE}?chainid=1&${params}${keyParam}`;
+  const url = `${ETHERSCAN_V2_BASE}?chainid=${chainId}&${params}${keyParam}`;
   try {
     const res = await fetch(url);
     const data = await res.json();
     if (data.status === "1") return data.result;
     if (!data.status && data.result) return data.result;
     if (data.status === "0" && Array.isArray(data.result)) return data.result;
-    console.warn(`Etherscan NOTOK [${action}]: message=${data.message}, result=${typeof data.result === 'string' ? data.result : JSON.stringify(data.result)}`);
+    console.warn(`Etherscan NOTOK [chain=${chainId}]: message=${data.message}, result=${typeof data.result === 'string' ? data.result : JSON.stringify(data.result)}`);
     return null;
   } catch (e) { console.warn("Etherscan API error:", e.message); return null; }
 };
@@ -180,12 +180,96 @@ const fetchWalletFromChain = async (address) => {
     });
     erc20Tokens.sort((a, b) => b.value - a.value);
 
+    // 6) Multichain: fetch native balances on L2s and alt-L1s
+    const L2_CHAINS = [
+      { id: 42161, name: "Arbitrum", native: "ETH", useEthPrice: true },
+      { id: 8453, name: "Base", native: "ETH", useEthPrice: true },
+      { id: 10, name: "Optimism", native: "ETH", useEthPrice: true },
+      { id: 137, name: "Polygon", native: "MATIC", useEthPrice: false, cgId: "matic-network" },
+      { id: 56, name: "BSC", native: "BNB", useEthPrice: false, cgId: "binancecoin" },
+    ];
+
+    // Fetch alt-L1 native prices from CoinGecko
+    let altPrices = {};
+    try {
+      const altIds = L2_CHAINS.filter((c) => !c.useEthPrice).map((c) => c.cgId).join(",");
+      const altRes = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${altIds}&vs_currencies=usd`);
+      if (altRes.ok) altPrices = await altRes.json();
+    } catch (e) { console.warn("[Multichain] Alt price fetch error:", e.message); }
+
+    const multichainTokens = [];
+    let multichainTotal = 0;
+    for (const chain of L2_CHAINS) {
+      await delay(API_DELAY);
+      try {
+        const balWei = await etherscanFetch(`module=account&action=balance&address=${address}&tag=latest`, chain.id);
+        const bal = balWei ? parseFloat(balWei) / 1e18 : 0;
+        if (bal > 0.0001) {
+          const price = chain.useEthPrice ? ethPrice : (altPrices[chain.cgId]?.usd || 0);
+          const value = parseFloat((bal * price).toFixed(2));
+          console.log(`[Multichain] ${chain.name}: ${bal.toFixed(6)} ${chain.native} = $${value}`);
+          multichainTokens.push({ symbol: `${chain.native} (${chain.name})`, name: `${chain.native} on ${chain.name}`, qty: parseFloat(bal.toFixed(6)), price, value, change: 0 });
+          multichainTotal += value;
+        }
+      } catch (e) { console.warn(`[Multichain] ${chain.name} balance error:`, e.message); }
+    }
+
+    // Fetch ERC-20 token holdings on major L2 chains (Arbitrum, Base, Optimism)
+    const L2_TOKEN_CHAINS = L2_CHAINS.filter((c) => c.useEthPrice); // ETH-native L2s
+    for (const chain of L2_TOKEN_CHAINS) {
+      await delay(API_DELAY);
+      try {
+        const l2TokenTxs = await etherscanFetch(`module=account&action=tokentx&address=${address}&page=1&offset=200&sort=desc`, chain.id);
+        if (!Array.isArray(l2TokenTxs) || l2TokenTxs.length === 0) continue;
+        const l2Contracts = {};
+        for (const tx of l2TokenTxs) {
+          const sym = tx.tokenSymbol;
+          if (!sym || sym.length > 10) continue;
+          if (!l2Contracts[sym]) l2Contracts[sym] = { symbol: sym, name: tx.tokenName || sym, decimals: parseInt(tx.tokenDecimal) || 18, contractAddress: tx.contractAddress };
+        }
+        const l2TokenList = Object.values(l2Contracts).slice(0, 20);
+        const l2WithBalance = [];
+        for (const tkn of l2TokenList) {
+          await delay(API_DELAY);
+          try {
+            const rawBal = await etherscanFetch(`module=account&action=tokenbalance&contractaddress=${tkn.contractAddress}&address=${address}&tag=latest`, chain.id);
+            const bal = rawBal ? parseFloat(rawBal) / Math.pow(10, tkn.decimals) : 0;
+            if (bal > 0.001) l2WithBalance.push({ ...tkn, balance: bal });
+          } catch (e) { /* skip */ }
+        }
+        // Price L2 tokens via CoinGecko (platform = chain-specific)
+        const CHAIN_CG_PLATFORM = { 42161: "arbitrum-one", 8453: "base", 10: "optimistic-ethereum" };
+        const platform = CHAIN_CG_PLATFORM[chain.id];
+        if (l2WithBalance.length > 0 && platform) {
+          try {
+            const addrs = l2WithBalance.map((t) => t.contractAddress.toLowerCase()).join(",");
+            const cgRes = await fetch(`https://api.coingecko.com/api/v3/simple/token_price/${platform}?contract_addresses=${addrs}&vs_currencies=usd`);
+            if (cgRes.ok) {
+              const cgData = await cgRes.json();
+              for (const tkn of l2WithBalance) {
+                const price = cgData[tkn.contractAddress.toLowerCase()]?.usd || KNOWN_PRICES_FALLBACK[tkn.symbol] || 0;
+                const value = parseFloat((tkn.balance * price).toFixed(2));
+                if (value > 0.01) {
+                  console.log(`[Multichain] ${chain.name} ${tkn.symbol}: bal=${tkn.balance.toFixed(4)}, price=$${price}, value=$${value}`);
+                  multichainTokens.push({ symbol: `${tkn.symbol} (${chain.name})`, name: `${tkn.name} on ${chain.name}`, qty: parseFloat(tkn.balance.toFixed(6)), price, value, change: 0 });
+                  multichainTotal += value;
+                }
+              }
+            }
+          } catch (e) { console.warn(`[Multichain] ${chain.name} CoinGecko error:`, e.message); }
+        }
+        console.log(`[Multichain] ${chain.name}: discovered ${Object.keys(l2Contracts).length} tokens, ${l2WithBalance.length} with balance`);
+      } catch (e) { console.warn(`[Multichain] ${chain.name} token discovery error:`, e.message); }
+    }
+    console.log(`[Multichain] Total from other chains: $${multichainTotal.toFixed(2)} across ${multichainTokens.length} assets`);
+
     const allTokens = [
       { symbol: "ETH", name: "Ethereum", qty: parseFloat(ethBalance.toFixed(6)), price: ethPrice, value: parseFloat(ethValue.toFixed(2)), change: 0 },
       ...erc20Tokens,
+      ...multichainTokens,
     ];
     const totalUsd = allTokens.reduce((s, t) => s + t.value, 0);
-    console.log(`[Chain] Final: ETH=${ethBalance.toFixed(6)}, erc20Tokens=${erc20Tokens.length}, totalUsd=$${totalUsd.toFixed(2)}, txns=${transactions.length}, txnCount=${txnCount}`);
+    console.log(`[Chain] Final: ETH=${ethBalance.toFixed(6)}, erc20=${erc20Tokens.length}, multichain=${multichainTokens.length}, totalUsd=$${totalUsd.toFixed(2)}`);
 
     return {
       ethBalance: parseFloat(ethBalance.toFixed(6)),
